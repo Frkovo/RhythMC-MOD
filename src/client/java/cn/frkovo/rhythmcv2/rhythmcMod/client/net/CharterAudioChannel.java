@@ -25,6 +25,8 @@ public final class CharterAudioChannel {
     public static final int OP_SET_LOOP = 7;
     public static final int OP_SET_SPEED = 8;
     public static final int OP_PING = 9;
+    /** v1.1: mod keybind transport request (actions routed through the plugin, never local). */
+    public static final int OP_TRANSPORT_REQ = 10;
     // S→C ack
     public static final int OP_HELLO_ACK = 101;
     // C→S

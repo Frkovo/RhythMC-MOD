@@ -25,6 +25,7 @@
 | S→C | 7 | SET_LOOP | `double aMs, double bMs`（bMs<0 = 清除） |
 | S→C | 8 | SET_SPEED | `float speed` |
 | S→C | 9 | PING | `long clientNonce` |
+| C→S | 10 | TRANSPORT_REQ | `byte action, int bars`（v1.1：mod 快捷键回传；action 0=play/pause 1=stop 2=seek±bars 3=loopA 4=loopB 5=clear） |
 | S→C | 101 | HELLO_ACK | `byte ok, string serverVersion, string sessionId` |
 | C→S | 102 | CHART_STATUS | `byte ok, string reason, string audioSha1, long lengthMs` |
 | C→S | 103 | STATE | `byte playing, double positionMs, float speed` |
@@ -38,7 +39,8 @@
 - STATE 每 10 tick 上报（与服务端对账周期一致，插件偏差 > 60ms 重 seek）。
 - capabilities 位：bit0 seek / bit1 loop / bit2 speed(重采样变调) / bit3+ 预留。
 - 音频匹配：`.minecraft/rhythmc-audio/<song_folder>/`，audioHint → audio/song/music/bgm/track/preview.* → 目录首个音频；CHART_STATUS.ok=1 时带 SHA-1 与时长。匹配失败 = 静音审计态（插件端 HUD 告警）。
-- mod 本地按键直控音频被**禁止**（避免双时钟源分叉）；未来按键走通道回服务端。
+- mod 快捷键（播放/暂停、±1 小节、A/B 设点）= C→S TRANSPORT_REQ(10)，动作全部由插件 Transport 执行——**mod 本地按键直控音频被禁止**（避免双时钟源分叉，§11.5）。
+- 客户端按键分类 `rhythmc-mod:charter`（KeyBinding.Category.create），默认键位 K/J/L/O/P。
 
 ### 变更流程
 

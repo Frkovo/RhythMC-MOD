@@ -5,13 +5,17 @@ import cn.frkovo.rhythmcv2.rhythmcMod.client.audio.CharterAudioEngine;
 import io.netty.buffer.Unpooled;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.option.KeyBinding;
 import net.minecraft.network.PacketByteBuf;
 
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
+
+import org.lwjgl.glfw.GLFW;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -26,6 +30,45 @@ public final class CharterAudioClient {
 
     private final CharterAudioEngine engine = new CharterAudioEngine();
     private final AtomicInteger tickCounter = new AtomicInteger();
+
+    private static final net.minecraft.client.option.KeyBinding.Category CATEGORY =
+            net.minecraft.client.option.KeyBinding.Category.create(
+                    net.minecraft.util.Identifier.of("rhythmc-mod", "charter"));
+
+    private net.minecraft.client.option.KeyBinding playPauseKey;
+    private net.minecraft.client.option.KeyBinding seekBackKey;
+    private net.minecraft.client.option.KeyBinding seekFwdKey;
+    private net.minecraft.client.option.KeyBinding loopAKey;
+    private net.minecraft.client.option.KeyBinding loopBKey;
+
+    private void handleKeybinds() {
+        while (playPauseKey.wasPressed()) {
+            sendTransportReq((byte) 0, 0);
+        }
+        while (seekBackKey.wasPressed()) {
+            sendTransportReq((byte) 2, -1);
+        }
+        while (seekFwdKey.wasPressed()) {
+            sendTransportReq((byte) 2, 1);
+        }
+        while (loopAKey.wasPressed()) {
+            sendTransportReq((byte) 3, 0);
+        }
+        while (loopBKey.wasPressed()) {
+            sendTransportReq((byte) 4, 0);
+        }
+    }
+
+    /** C→S transport 请求：action 0=play/pause 1=stop 2=seek(±bars) 3=loopA 4=loopB 5=clear loop。 */
+    private void sendTransportReq(byte action, int bars) {
+        if (!handshakeOk || sessionId.isEmpty()) {
+            return;
+        }
+        PacketByteBuf buf = frame(CharterAudioChannel.OP_TRANSPORT_REQ);
+        buf.writeByte(action);
+        buf.writeInt(bars);
+        send(buf);
+    }
 
     private volatile boolean handshakeOk;
     private volatile String serverVersion = "";
@@ -69,7 +112,20 @@ public final class CharterAudioClient {
             if (tickCounter.incrementAndGet() % 10 == 0) {
                 sendState();
             }
+            handleKeybinds();
         });
+
+        // 快捷键（§11.5）：纯客户端入口，动作全部经插件通道下发（不得本地直改音频）
+        playPauseKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.rhythmc-mod.playpause", GLFW.GLFW_KEY_K, CATEGORY));
+        seekBackKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.rhythmc-mod.seek-back", GLFW.GLFW_KEY_J, CATEGORY));
+        seekFwdKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.rhythmc-mod.seek-fwd", GLFW.GLFW_KEY_L, CATEGORY));
+        loopAKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.rhythmc-mod.loop-a", GLFW.GLFW_KEY_O, CATEGORY));
+        loopBKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.rhythmc-mod.loop-b", GLFW.GLFW_KEY_P, CATEGORY));
     }
 
     private void resetHandshake() {
