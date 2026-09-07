@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "rhythmc-mod",
+  "version": "${version}",
+  "name": "RhythMC-MOD",
+  "description": "RhythMC Chart Editor",
+  "authors": [],
+  "contact": {},
+  "license": "GPL-3.0",
+  "icon": "assets/rhythmc-mod/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "fabric-datagen": [
+      "cn.frkovo.rhythmcv2.rhythmcMod.client.RhythmcModDataGenerator"
+    ],
+    "client": [
+      "cn.frkovo.rhythmcv2.rhythmcMod.client.RhythmcModClient"
+    ],
+    "main": [
+      "cn.frkovo.rhythmcv2.rhythmcMod.RhythmcMod"
+    ]
+  },
+  "mixins": [
+    "rhythmc-mod.mixins.json",
+    {
+      "config": "rhythmc-mod.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
