@@ -1,0 +1,10 @@
+{
+  "key.category.rhythmc-mod.transport": "RhythMC 播放控制",
+  "key.rhythmc-mod.toggle_play": "播放 / 暂停",
+  "key.rhythmc-mod.prev_bar": "上一小节",
+  "key.rhythmc-mod.next_bar": "下一小节",
+  "key.rhythmc-mod.loop_a": "设置循环 A 点",
+  "key.rhythmc-mod.loop_b": "设置循环 B 点",
+  "key.rhythmc-mod.loop_clear": "清除循环",
+  "key.rhythmc-mod.stop": "停止"
+}

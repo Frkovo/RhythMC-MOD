@@ -1,0 +1,10 @@
+{
+  "key.category.rhythmc-mod.transport": "RhythMC Transport",
+  "key.rhythmc-mod.toggle_play": "Play / Pause",
+  "key.rhythmc-mod.prev_bar": "Previous Bar",
+  "key.rhythmc-mod.next_bar": "Next Bar",
+  "key.rhythmc-mod.loop_a": "Set Loop A",
+  "key.rhythmc-mod.loop_b": "Set Loop B",
+  "key.rhythmc-mod.loop_clear": "Clear Loop",
+  "key.rhythmc-mod.stop": "Stop"
+}

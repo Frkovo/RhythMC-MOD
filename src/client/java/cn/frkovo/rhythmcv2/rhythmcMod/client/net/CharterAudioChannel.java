@@ -28,6 +28,15 @@ public final class CharterAudioChannel {
     /** v1.1: mod keybind transport request (actions routed through the plugin, never local). */
     public static final int OP_TRANSPORT_REQ = 10;
 
+    // TRANSPORT_REQ action（与插件 CharterAudioBridge 严格一致）
+    public static final int REQ_TOGGLE_PLAY = 0;
+    public static final int REQ_PREV_BAR = 1;
+    public static final int REQ_NEXT_BAR = 2;
+    public static final int REQ_LOOP_A = 3;
+    public static final int REQ_LOOP_B = 4;
+    public static final int REQ_LOOP_CLEAR = 5;
+    public static final int REQ_STOP = 6;
+
     // M0 音频推送（服务端→客户端，分块）
     public static final int OP_AUDIO_PUSH_START = 106; // S→C
     public static final int OP_AUDIO_PUSH_CHUNK = 107; // S→C

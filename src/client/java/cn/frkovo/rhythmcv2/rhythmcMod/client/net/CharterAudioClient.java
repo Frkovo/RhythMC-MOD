@@ -31,6 +31,7 @@ public final class CharterAudioClient {
 
     private final CharterAudioEngine engine = new CharterAudioEngine();
     private final AudioTransferReceiver receiver = new AudioTransferReceiver();
+    private final ChartMetaState chartMeta = new ChartMetaState();
     private final AtomicInteger tickCounter = new AtomicInteger();
 
     private volatile boolean handshakeOk;
@@ -49,6 +50,10 @@ public final class CharterAudioClient {
 
     public CharterAudioEngine engine() {
         return engine;
+    }
+
+    public ChartMetaState chartMeta() {
+        return chartMeta;
     }
 
     public void register() {
@@ -80,6 +85,10 @@ public final class CharterAudioClient {
                     && MinecraftClient.getInstance().getNetworkHandler() != null) {
                 sendHello();
             }
+            // STATE(103)：播放状态/位置周期上报，供插件对账
+            if (handshakeOk && tick % 5 == 0) {
+                sendState();
+            }
         });
     }
 
@@ -90,6 +99,7 @@ public final class CharterAudioClient {
         loadedFile = null;
         engine.stop();
         receiver.reset();
+        chartMeta.reset();
     }
 
     // ---- 发送 ----
@@ -134,6 +144,29 @@ public final class CharterAudioClient {
         send(buf);
     }
 
+    /** STATE(103)：byte playing, double positionMs, float speed。 */
+    public void sendState() {
+        if (!handshakeOk) {
+            return;
+        }
+        PacketByteBuf buf = frame(CharterAudioChannel.OP_STATE);
+        buf.writeByte(engine.isPlaying() ? 1 : 0);
+        buf.writeDouble(engine.positionMs());
+        buf.writeFloat(engine.speed());
+        send(buf);
+    }
+
+    /** TRANSPORT_REQ(10)：mod 键位请求（由插件执行）。 */
+    public void requestTransport(int action, int bars) {
+        if (!handshakeOk) {
+            return;
+        }
+        PacketByteBuf buf = frame(CharterAudioChannel.OP_TRANSPORT_REQ);
+        buf.writeByte(action);
+        buf.writeInt(bars);
+        send(buf);
+    }
+
     // ---- 接收 ----
 
     private void handleServerPacket(PacketByteBuf payload) {
@@ -145,6 +178,7 @@ public final class CharterAudioClient {
             readUtf8(in); // sessionId：M0 忽略
             switch (opcode) {
                 case CharterAudioChannel.OP_HELLO_ACK -> handleHelloAck(in);
+                case CharterAudioChannel.OP_CHART_META -> handleChartMeta(in);
                 case CharterAudioChannel.OP_AUDIO_PUSH_START -> handlePushStart(in);
                 case CharterAudioChannel.OP_AUDIO_PUSH_CHUNK -> handlePushChunk(in);
                 case CharterAudioChannel.OP_AUDIO_PUSH_END -> handlePushEnd(in);
@@ -153,21 +187,37 @@ public final class CharterAudioClient {
                     long fromMs = (long) in.readDouble();
                     float speed = in.readFloat();
                     playFromServer(fromMs, speed);
+                    sendState();
                 }
                 case CharterAudioChannel.OP_TRANSPORT_PAUSE -> {
-                    if (handshakeOk) engine.pause();
+                    if (handshakeOk) {
+                        engine.pause();
+                        sendState();
+                    }
                 }
                 case CharterAudioChannel.OP_TRANSPORT_SEEK -> {
-                    if (handshakeOk) engine.seek((long) in.readDouble());
+                    if (handshakeOk) {
+                        engine.seek((long) in.readDouble());
+                        sendState();
+                    }
                 }
                 case CharterAudioChannel.OP_TRANSPORT_STOP -> {
-                    if (handshakeOk) engine.stop();
+                    if (handshakeOk) {
+                        engine.stop();
+                        sendState();
+                    }
                 }
                 case CharterAudioChannel.OP_SET_LOOP -> {
-                    if (handshakeOk) engine.setLoop((long) in.readDouble(), (long) in.readDouble());
+                    if (handshakeOk) {
+                        engine.setLoop((long) in.readDouble(), (long) in.readDouble());
+                        sendState();
+                    }
                 }
                 case CharterAudioChannel.OP_SET_SPEED -> {
-                    if (handshakeOk) engine.setSpeed(in.readFloat());
+                    if (handshakeOk) {
+                        engine.setSpeed(in.readFloat());
+                        sendState();
+                    }
                 }
                 case CharterAudioChannel.OP_PING -> {
                     if (!handshakeOk) return;
@@ -197,6 +247,23 @@ public final class CharterAudioClient {
             LOGGER.warn("[charter_audio] protocol mismatch: server={} — 请更新 Mod/插件到同一版本",
                     serverVersion);
         }
+    }
+
+    private void handleChartMeta(DataInputStream in) throws IOException {
+        if (!handshakeOk) return;
+        String songName = readUtf8(in);
+        long lengthMs = in.readLong();
+        long offsetMs = in.readLong();
+        int bpmCount = in.readInt();
+        if (bpmCount < 0 || bpmCount > 4096) {
+            return;
+        }
+        java.util.List<ChartMetaState.Bpm> bpms = new java.util.ArrayList<>(bpmCount);
+        for (int i = 0; i < bpmCount; i++) {
+            bpms.add(new ChartMetaState.Bpm(in.readDouble(), in.readDouble()));
+        }
+        chartMeta.update(songName, lengthMs, offsetMs, bpms);
+        LOGGER.info("[charter_audio] chart meta: {} length={}ms bpms={}", songName, lengthMs, bpmCount);
     }
 
     private void handlePushStart(DataInputStream in) throws IOException {
