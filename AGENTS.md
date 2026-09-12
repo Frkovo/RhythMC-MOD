@@ -8,7 +8,7 @@ talking to the Paper plugin **RhythMC-Charter-V2** (parent repository).
 
 1. `AGENTS.md` (this file)
 2. `.agent/CONTRACTS.md` — authoritative `rhythmc:charter_audio` contract
-3. `../docs/charter-design.md` — full design document (Chinese, in the parent repo)
+3. `../.agent/RMCD-FORMAT.md` — chart persistence format (parent repo; RMCD v1)
 4. `../src/main/resources/config.yml` — server-side audio push settings (parent repo)
 
 ## Repository Map
@@ -33,7 +33,7 @@ Contract changes must update, **in the same task**:
 1. this mod (implementation),
 2. the server plugin in the parent repo (implementation),
 3. `.agent/CONTRACTS.md` in **both** repositories (keep them identical),
-4. `../docs/charter-design.md` when behavior/design changes.
+4. `../.agent/RMCD-FORMAT.md` when the chart persistence format changes.
 
 ## Non-Negotiable Rules
 
@@ -66,7 +66,7 @@ Unknown opcodes are ignored. `sessionId` is always `""` and is not validated.
 | C→S | 11 | `AUDIO_PUSH_ACK` | `String transferId, byte ok, String reason` |
 | C→S | 103 | `STATE` | `byte playing, double positionMs, float speed`（每 5 tick + 状态变更即发，对账数据源） |
 | C→S | 105 | `ERROR` | `String message` |
-| S→C | 2 | `CHART_META` | `String songName, long lengthMs, long offsetMs, int bpmCount, {double beat,double bpm}[]` |
+| S→C | 2 | `CHART_META` | `String songName, long lengthMs, long offsetMs, int bpmCount, {double beat,double bpm}[], int subdivCount, {double startBeat,int noteValue}[]`（当前 Track 分音网格；mod 时间轴 HUD 按它画线） |
 | S→C | 3 | `TRANSPORT_PLAY` | `double fromMs, float speed` |
 | S→C | 4 | `TRANSPORT_PAUSE` | — |
 | S→C | 5 | `TRANSPORT_SEEK` | `double toMs` |
@@ -76,6 +76,10 @@ Unknown opcodes are ignored. `sessionId` is always `""` and is not validated.
 | S→C | 106 | `AUDIO_PUSH_START` | `String transferId, String songFolder, String fileName, long totalBytes, String sha256, int chunkSize, int totalChunks` |
 | S→C | 107 | `AUDIO_PUSH_CHUNK` | `String transferId, int index, int length, byte[length]` |
 | S→C | 108 | `AUDIO_PUSH_END` | `String transferId` |
+| S→C | 109 | `CHART_NOTES` | `int count, {double beat, byte type}[]`（时间轴 HUD 音符快照；mod-ready/播放/音符变更时全量发送，type=NoteType ordinal） |
+| C→S | 110 | `VIEW_ZOOM` | `byte direction`（世界网格缩放 ±1 级；SHIFT+滚轮） |
+| S→C | 111 | `VIEW_STATE` | `int zoomIndex, double barBlocks, int levelCount, double cursorMs`（时间轴 HUD 窗口中心/缩放状态） |
+| C→S | 112 | `VIEW_SEEK` | `double toMs`（ALT 调整层点击/拖动时间轴 seek） |
 
 Reserved for later milestones (do not repurpose): 8, 9, 102, 104.
 See `.agent/CONTRACTS.md` for the full lifecycle and trust model.

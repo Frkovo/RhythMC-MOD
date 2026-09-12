@@ -50,6 +50,14 @@ public final class CharterAudioChannel {
     public static final int OP_STATE = 103;
     public static final int OP_PONG = 104;
     public static final int OP_ERROR = 105;
+    /** v1.1: 谱面音符快照（时间轴 HUD）：int count + {double beat, byte type}[]。 */
+    public static final int OP_CHART_NOTES = 109;
+    /** v1.1: 世界网格缩放请求（C→S）：byte direction（+1 更细/更大格，-1 更粗）。 */
+    public static final int OP_VIEW_ZOOM = 110;
+    /** v1.1: 视图状态（S→C）：int zoomIndex, double barBlocks, int levelCount, double cursorMs。 */
+    public static final int OP_VIEW_STATE = 111;
+    /** v1.1: 时间轴点击 seek 请求（C→S）：double toMs。 */
+    public static final int OP_VIEW_SEEK = 112;
 
     private CharterAudioChannel() {
     }

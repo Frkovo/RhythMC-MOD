@@ -23,6 +23,9 @@ public final class CharterAudioEngine {
     private volatile int channels = 2;
     private volatile long lengthMs;
     private volatile String loadedSha1 = "";
+    /** 时间轴 HUD 高分辨率峰值缓存（全曲固定桶数），窗口视图按比例采样。 */
+    private volatile float[] hiResPeaks = new float[0];
+    private static final int HI_RES_BUCKETS = 16384;
 
     private final Object lock = new Object();
     private SourceDataLine line;
@@ -52,6 +55,7 @@ public final class CharterAudioEngine {
                 this.loadedSha1 = sha1 == null ? "" : sha1;
                 this.pcmOffset = 0;
                 this.framesWritten = 0;
+                this.hiResPeaks = new float[0];
             }
             return true;
         } catch (Exception e) {
@@ -145,6 +149,95 @@ public final class CharterAudioEngine {
 
     public float speed() {
         return speed;
+    }
+
+    public long loopAMs() {
+        return loopAMs;
+    }
+
+    public long loopBMs() {
+        return loopBMs;
+    }
+
+    /**
+     * 时间轴 HUD 波形峰值（0..1）：全曲按桶取第一声道的 max|sample|。
+     */
+    public float[] waveformPeaks(int buckets) {
+        return waveformWindow(buckets, 0d, 1d);
+    }
+
+    /** 波形窗口：给定 [fromFraction, toFraction] 区间，从高分辨率缓存按比例采样。 */
+    public float[] waveformWindow(int buckets, double fromFraction, double toFraction) {
+        int n = Math.max(1, buckets);
+        float[] hi = hiResPeaks();
+        if (hi.length == 0) {
+            return new float[0];
+        }
+        double from = Math.max(0d, Math.min(1d, fromFraction));
+        double to = Math.max(from + 1.0E-9d, Math.min(1d, toFraction));
+        float[] result = new float[n];
+        for (int i = 0; i < n; i++) {
+            int i0 = (int) Math.floor((from + (to - from) * i / n) * hi.length);
+            int i1 = (int) Math.ceil((from + (to - from) * (i + 1) / n) * hi.length);
+            i0 = Math.max(0, Math.min(hi.length - 1, i0));
+            i1 = Math.max(i0 + 1, Math.min(hi.length, i1));
+            float peak = 0f;
+            for (int k = i0; k < i1; k++) {
+                if (hi[k] > peak) {
+                    peak = hi[k];
+                }
+            }
+            result[i] = peak;
+        }
+        return result;
+    }
+
+    private float[] hiResPeaks() {
+        float[] cached = hiResPeaks;
+        if (cached.length == HI_RES_BUCKETS) {
+            return cached;
+        }
+        byte[] data = pcm;
+        if (data.length == 0 || lengthMs <= 0 || channels <= 0) {
+            return new float[0];
+        }
+        int frameBytes = 2 * channels;
+        int frames = data.length / frameBytes;
+        if (frames <= 0) {
+            return new float[0];
+        }
+        float[] computed = computePeaks(0, frames, HI_RES_BUCKETS);
+        hiResPeaks = computed;
+        return computed;
+    }
+
+    /** 按帧区间 [firstFrame, lastFrame) 计算 buckets 个峰值（第一声道）。 */
+    private float[] computePeaks(int firstFrame, int lastFrame, int buckets) {
+        byte[] data = pcm;
+        int frameBytes = 2 * channels;
+        int frames = data.length / frameBytes;
+        int from = Math.max(0, Math.min(frames - 1, firstFrame));
+        int to = Math.max(from + 1, Math.min(frames, lastFrame));
+        int span = to - from;
+        float[] result = new float[buckets];
+        for (int i = 0; i < buckets; i++) {
+            int f0 = from + (int) ((long) span * i / buckets);
+            int f1 = from + (int) ((long) span * (i + 1) / buckets);
+            if (f1 <= f0) {
+                f1 = f0 + 1;
+            }
+            float peak = 0f;
+            for (int f = f0; f < f1 && f < frames; f++) {
+                int idx = f * frameBytes;
+                short sample = (short) (((data[idx + 1] & 0xFF) << 8) | (data[idx] & 0xFF));
+                float value = Math.abs(sample) / 32768f;
+                if (value > peak) {
+                    peak = value;
+                }
+            }
+            result[i] = peak;
+        }
+        return result;
     }
 
     // ---- 内部 ----

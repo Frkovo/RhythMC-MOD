@@ -6,5 +6,6 @@
   "key.rhythmc-mod.loop_a": "Set Loop A",
   "key.rhythmc-mod.loop_b": "Set Loop B",
   "key.rhythmc-mod.loop_clear": "Clear Loop",
-  "key.rhythmc-mod.stop": "Stop"
+  "key.rhythmc-mod.stop": "Stop",
+  "key.rhythmc-mod.timeline_hud": "Toggle Timeline HUD"
 }

@@ -32,6 +32,8 @@ public final class CharterAudioClient {
     private final CharterAudioEngine engine = new CharterAudioEngine();
     private final AudioTransferReceiver receiver = new AudioTransferReceiver();
     private final ChartMetaState chartMeta = new ChartMetaState();
+    private final ChartNotesState chartNotes = new ChartNotesState();
+    private final ViewState viewState = new ViewState();
     private final AtomicInteger tickCounter = new AtomicInteger();
 
     private volatile boolean handshakeOk;
@@ -54,6 +56,14 @@ public final class CharterAudioClient {
 
     public ChartMetaState chartMeta() {
         return chartMeta;
+    }
+
+    public ChartNotesState chartNotes() {
+        return chartNotes;
+    }
+
+    public ViewState viewState() {
+        return viewState;
     }
 
     public void register() {
@@ -100,6 +110,8 @@ public final class CharterAudioClient {
         engine.stop();
         receiver.reset();
         chartMeta.reset();
+        chartNotes.reset();
+        viewState.reset();
     }
 
     // ---- 发送 ----
@@ -167,6 +179,26 @@ public final class CharterAudioClient {
         send(buf);
     }
 
+    /** VIEW_ZOOM(110)：世界网格缩放 ±1 级（SHIFT+滚轮）。 */
+    public void requestViewZoom(int direction) {
+        if (!handshakeOk) {
+            return;
+        }
+        PacketByteBuf buf = frame(CharterAudioChannel.OP_VIEW_ZOOM);
+        buf.writeByte(direction);
+        send(buf);
+    }
+
+    /** VIEW_SEEK(112)：时间轴点击/拖动 seek（不适用对账，插件走正常 seek 路径）。 */
+    public void requestViewSeek(double toMs) {
+        if (!handshakeOk) {
+            return;
+        }
+        PacketByteBuf buf = frame(CharterAudioChannel.OP_VIEW_SEEK);
+        buf.writeDouble(Math.max(0d, toMs));
+        send(buf);
+    }
+
     // ---- 接收 ----
 
     private void handleServerPacket(PacketByteBuf payload) {
@@ -179,6 +211,8 @@ public final class CharterAudioClient {
             switch (opcode) {
                 case CharterAudioChannel.OP_HELLO_ACK -> handleHelloAck(in);
                 case CharterAudioChannel.OP_CHART_META -> handleChartMeta(in);
+                case CharterAudioChannel.OP_CHART_NOTES -> handleChartNotes(in);
+                case CharterAudioChannel.OP_VIEW_STATE -> handleViewState(in);
                 case CharterAudioChannel.OP_AUDIO_PUSH_START -> handlePushStart(in);
                 case CharterAudioChannel.OP_AUDIO_PUSH_CHUNK -> handlePushChunk(in);
                 case CharterAudioChannel.OP_AUDIO_PUSH_END -> handlePushEnd(in);
@@ -262,8 +296,59 @@ public final class CharterAudioClient {
         for (int i = 0; i < bpmCount; i++) {
             bpms.add(new ChartMetaState.Bpm(in.readDouble(), in.readDouble()));
         }
-        chartMeta.update(songName, lengthMs, offsetMs, bpms);
-        LOGGER.info("[charter_audio] chart meta: {} length={}ms bpms={}", songName, lengthMs, bpmCount);
+        int subdivCount = in.readInt();
+        if (subdivCount < 0 || subdivCount > 4096) {
+            return;
+        }
+        java.util.List<ChartMetaState.Subdivision> subdivisions = new java.util.ArrayList<>(subdivCount);
+        for (int i = 0; i < subdivCount; i++) {
+            double startBeat = in.readDouble();
+            int noteValue = in.readInt();
+            if (!Double.isFinite(startBeat) || startBeat < 0 || noteValue <= 0) {
+                return;
+            }
+            subdivisions.add(new ChartMetaState.Subdivision(startBeat, noteValue));
+        }
+        chartMeta.update(songName, lengthMs, offsetMs, bpms, subdivisions);
+        LOGGER.info("[charter_audio] chart meta: {} length={}ms bpms={} subdivs={}",
+                songName, lengthMs, bpmCount, subdivCount);
+    }
+
+    /** CHART_NOTES(109)：int count + {double beat, byte type}[]；坏快照整包丢弃。 */
+    private void handleChartNotes(DataInputStream in) throws IOException {
+        if (!handshakeOk) {
+            return;
+        }
+        int count = in.readInt();
+        if (count < 0 || count > ChartNotesState.MAX_NOTES) {
+            return;
+        }
+        java.util.List<ChartNotesState.NoteMarker> notes = new java.util.ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            double beat = in.readDouble();
+            int type = in.readByte() & 0xFF;
+            if (!Double.isFinite(beat) || beat < 0 || type > 3) {
+                return;
+            }
+            notes.add(new ChartNotesState.NoteMarker(beat, type));
+        }
+        chartNotes.update(notes);
+        LOGGER.info("[charter_audio] chart notes: {} markers", count);
+    }
+
+    /** VIEW_STATE(111)：int zoomIndex, double barBlocks, int levelCount, double cursorMs。 */
+    private void handleViewState(DataInputStream in) throws IOException {
+        if (!handshakeOk) {
+            return;
+        }
+        int zoomIndex = in.readInt();
+        double barBlocks = in.readDouble();
+        int levelCount = in.readInt();
+        double cursorMs = in.readDouble();
+        if (levelCount < 1 || levelCount > 64 || !(barBlocks > 0) || !Double.isFinite(barBlocks)) {
+            return;
+        }
+        viewState.update(Math.max(0, zoomIndex), barBlocks, levelCount, Math.max(0d, cursorMs));
     }
 
     private void handlePushStart(DataInputStream in) throws IOException {

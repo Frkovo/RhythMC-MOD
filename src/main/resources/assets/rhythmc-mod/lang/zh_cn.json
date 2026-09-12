@@ -6,5 +6,6 @@
   "key.rhythmc-mod.loop_a": "设置循环 A 点",
   "key.rhythmc-mod.loop_b": "设置循环 B 点",
   "key.rhythmc-mod.loop_clear": "清除循环",
-  "key.rhythmc-mod.stop": "停止"
+  "key.rhythmc-mod.stop": "停止",
+  "key.rhythmc-mod.timeline_hud": "时间轴 HUD 开关"
 }

@@ -1,6 +1,7 @@
 package cn.frkovo.rhythmcv2.rhythmcMod.mixin.client;
 
 import cn.frkovo.rhythmcv2.rhythmcMod.client.audio.DownloadProgressState;
+import cn.frkovo.rhythmcv2.rhythmcMod.client.timeline.TimelineHud;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.hud.InGameHud;
@@ -66,6 +67,11 @@ public class InGameHudMixin {
             context.fill(x + 2, y + 2, x + barWidth - 2, y + 12, 0xFF55C878);
         }
         context.drawText(client.textRenderer, text, x + (barWidth - textWidth) / 2, y + 3, 0xFFFFFFFF, true);
+    }
+
+    @Inject(method = "render", at = @At("TAIL"))
+    private void rhythmc$renderTimelineHud(DrawContext context, RenderTickCounter tickCounter, CallbackInfo ci) {
+        TimelineHud.render(context);
     }
 
     private static String mb(long bytes) {

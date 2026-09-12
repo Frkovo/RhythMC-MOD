@@ -1,6 +1,6 @@
 # Contract Map
 
-Updated: 2026-09-10 (M2: transport + STATE reconcile + CHART_META)
+Updated: 2026-09-12 (RMCD format; CHART_NOTES; VIEW_ZOOM/VIEW_STATE/VIEW_SEEK)
 
 ## Contract Change Definition
 
@@ -30,12 +30,14 @@ Protocol version: `PROTOCOL_VERSION = 1` (fresh baseline; no legacy compatibilit
 | 102 | `CHART_STATUS` | `boolean ok`, `String reason`, `String sha1`, `long lengthMs` | Reserved (V1). |
 | 104 | `PONG` | `long nonce` | Reserved (V1); answers S→C `PING`. |
 | 105 | `ERROR` | `String message` | Human-readable. Plugin logs it and forwards to the sender's chat. |
+| 110 | `VIEW_ZOOM` | `byte direction` | Live (v1.1). Mod world-grid zoom request (SHIFT+wheel). `+1` = finer (more blocks per bar), `-1` = coarser; the plugin clamps to `editor.grid.zoom-levels`. |
+| 112 | `VIEW_SEEK` | `double toMs` | Live (v1.1). Timeline click/drag seek from the ALT adjust overlay. The plugin runs its normal seek path (play/pause/edit); in edit mode it moves the cursor. |
 
 ### Direction Server → Client
 
 | Opcode | Name | Payload | Notes |
 |---|---|---|---|
-| 2 | `CHART_META` | `String songName`, `long lengthMs`, `long offsetMs`, `int bpmCount`, `{double beat, double bpm}` × bpmCount | Live (M2). Sent on session open, on play start and after BPM edits. Feeds the mod timeline HUD beat grid. |
+| 2 | `CHART_META` | `String songName`, `long lengthMs`, `long offsetMs`, `int bpmCount`, `{double beat, double bpm}` × bpmCount, `int subdivCount`, `{double startBeat, int noteValue}` × subdivCount | Live (M2). Sent on session open, on play start, after BPM edits, on active-track change and after subdivision edits. `subdivCount` describes the **active track's** subdivision grid (phase A, `4/noteValue` step) so the mod timeline HUD draws the same lines as the in-world ruler. |
 | 3 | `TRANSPORT_PLAY` | `double fromMs`, `float speed` | Live. Only usable after `AUDIO_PUSH_ACK(ok=1)`; otherwise the mod replies `ERROR(105)`. `speed` is always `1.0` for now. |
 | 4 | `TRANSPORT_PAUSE` | (none) | Live (M2). |
 | 5 | `TRANSPORT_SEEK` | `double toMs` | Live (M2). |
@@ -47,6 +49,8 @@ Protocol version: `PROTOCOL_VERSION = 1` (fresh baseline; no legacy compatibilit
 | 106 | `AUDIO_PUSH_START` | `String transferId`, `String songFolder`, `String fileName`, `long totalBytes`, `String sha256`, `int chunkSize`, `int totalChunks` | Sent automatically after a successful HELLO. `sha256` is lowercase hex. |
 | 107 | `AUDIO_PUSH_CHUNK` | `String transferId`, `int index`, `int length`, `byte[length]` | `index` starts at 0. Server throttles on the main thread (default 16 chunks × 65536 B/tick ≈ 1 MiB/tick). |
 | 108 | `AUDIO_PUSH_END` | `String transferId` | Client then verifies and responds `AUDIO_PUSH_ACK`. |
+| 109 | `CHART_NOTES` | `int noteCount`, `{double beat, byte type}` × noteCount | Full snapshot for the mod timeline HUD, ascending by beat, `type` = `NoteType` ordinal (0=TAP, 1=LOOK, 2=HOLD, 3=DODGE), capped at 65536 markers. Sent on the mod-ready edge, on play start and after every note change. The mod replaces its cache or drops the whole frame when malformed. |
+| 111 | `VIEW_STATE` | `int zoomIndex`, `double barBlocks`, `int levelCount`, `double cursorMs` | Live (v1.1). Sent on the mod-ready edge, on zoom change and periodically while editing. Feeds the timeline HUD window center (`cursorMs`) and the current world-grid zoom display. |
 
 ### Chunking
 
@@ -82,14 +86,35 @@ All payloads use plugin-channel raw bytes. The frame is a big-endian `int` opcod
 9. A-B loop: the plugin wraps its own clock at B and sends `TRANSPORT_SEEK(A)` on wrap; the mod engine also loops locally. Reconcile corrects drift.
 10. Player quit cancels any incomplete transfer and tears down the session; rejoin restarts from 0 (no resume).
 11. If no ACK arrives within 30s after `AUDIO_PUSH_END`, the server marks the push failed and notifies via `ERROR(105)`.
+12. Timeline HUD data: `CHART_META(2)`, `CHART_NOTES(109)` and `VIEW_STATE(111)` are sent when the mod becomes ready and on play start; `CHART_NOTES` also after every note change, `CHART_META` after BPM edits, `VIEW_STATE` on zoom change and periodically while editing. All are full snapshots; the mod never requests them.
 
 ### Config Keys
 
 - Plugin `plugins/RhythMC-Charter-V2/config.yml`: `audio.chunk-size` (default 65536), `audio.chunks-per-tick` (default 16), `audio.dummy.song-folder` (default `dummy_song`), `audio.dummy.file` (default `audio/dummy_song/<file>.flac`, relative to the plugin data folder).
 - Plugin transport/reconcile: `transport.sync-threshold-ms` (default 60), `transport.reconcile-interval-ticks` (default 10).
-- Plugin editor (local state, no peer dependency): `editor.default-speed`, `editor.default-length-ms`, `editor.render-distance`, `editor.corridor.*`, `editor.ruler.*`, `editor.placement.*`.
+- Plugin editor (local state, no peer dependency): `editor.default-speed`, `editor.default-length-ms`, `editor.render-distance`, `editor.grid.*` (incl. `bar-blocks` default level and `zoom-levels`), `editor.corridor.*`, `editor.ruler.*`, `editor.placement.*`, `editor.follow.*`.
 - Mod storage: `<gameDir>/rhythmc-audio/<songFolder>/`. FLAC playback uses low-level `org.jflac.FLACDecoder` (`decodeFrames()`), plus the existing vorbis/mp3 SPI fallback chain.
+
+## Chart File Formats (local, no protocol impact)
+
+Chart files never travel over `rhythmc:charter_audio`; they are read and written on the
+server side only, so they are not a cross-repo wire contract. They are documented here
+because the compiled output must be byte-compatible with what RhythMC-Reborn /
+RhythMC-Preview deserialize.
+
+- **RMCD v1** — `RhythMC Editor Chart Data`, the editor's authoritative persistence format:
+  a single UTF-8 JSON file (`*.rmcd`) that losslessly stores META, every track and note, and
+  the editor-only state RMCC cannot express (track names, stable note ids, subdivision
+  segments, cursor). Musical values (beats, BPM, event values) are exact reduced fractions
+  (`{"num":n,"den":d}`); geometry (position/scale/rotation) stays decimal; `offsetMs` /
+  `lengthMs` stay plain integer milliseconds. Full specification:
+  `.agent/RMCD-FORMAT.md` (single source of truth).
+- **RMCC** — the runtime chart format consumed by RhythMC-Reborn / RhythMC-Preview
+  (`world.rmcc`, `nether.rmcc`, `end.rmcc`, `void.rmcc` + `manifest.yml`). Owned by those
+  repos; this plugin only ever writes it, per the mapping in `.agent/RMCD-FORMAT.md` §8.
+  The RMCD → RMCC compiler is specified there but **not implemented yet**; no `/charter`
+  save/open/compile command exists at the time of writing.
 
 ## Out of Scope
 
-There is no HTTP, WebSocket, DB, auth/session, resource-pack, or frontend DTO contract in this repo. Do not reintroduce any of these. `rhythmc:chart_preview` belongs to RhythMCChartMaker + RhythMC-Preview and must not be modified from here. Not in v1: `SET_SPEED`/pitch-preserving speed, chart file import/persistence (all editor state is in-memory), note editing commands beyond placement, and judging/gameplay scoring.
+There is no HTTP, WebSocket, DB, auth/session, resource-pack, or frontend DTO contract in this repo. Do not reintroduce any of these. `rhythmc:chart_preview` belongs to RhythMCChartMaker + RhythMC-Preview and must not be modified from here. Not in v1: `SET_SPEED`/pitch-preserving speed, note editing commands beyond placement, and judging/gameplay scoring. Editor chart persistence beyond the documented RMCD format (implementation is a later milestone) is also out of scope for now.

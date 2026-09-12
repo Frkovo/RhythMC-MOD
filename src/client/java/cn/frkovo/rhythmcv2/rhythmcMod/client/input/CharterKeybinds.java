@@ -2,6 +2,7 @@ package cn.frkovo.rhythmcv2.rhythmcMod.client.input;
 
 import cn.frkovo.rhythmcv2.rhythmcMod.client.net.CharterAudioChannel;
 import cn.frkovo.rhythmcv2.rhythmcMod.client.net.CharterAudioClient;
+import cn.frkovo.rhythmcv2.rhythmcMod.client.timeline.TimelineHud;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.option.KeyBinding;
@@ -25,6 +26,7 @@ public final class CharterKeybinds {
     private static KeyBinding loopB;
     private static KeyBinding loopClear;
     private static KeyBinding stop;
+    private static KeyBinding timelineHud;
 
     private CharterKeybinds() {
     }
@@ -37,6 +39,7 @@ public final class CharterKeybinds {
         loopB = reg("key.rhythmc-mod.loop_b");
         loopClear = reg("key.rhythmc-mod.loop_clear");
         stop = reg("key.rhythmc-mod.stop");
+        timelineHud = reg("key.rhythmc-mod.timeline_hud");
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             CharterAudioClient audio = CharterAudioClient.get();
@@ -60,6 +63,9 @@ public final class CharterKeybinds {
             }
             while (stop.wasPressed()) {
                 audio.requestTransport(CharterAudioChannel.REQ_STOP, 1);
+            }
+            while (timelineHud.wasPressed()) {
+                TimelineHud.toggle();
             }
         });
     }
