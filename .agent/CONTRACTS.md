@@ -11,7 +11,7 @@ A task crosses a contract boundary when it changes any of these:
 - Audio push semantics (chunking, hashing, ACK, client storage layout).
 - Plugin config keys or mod config keys that both sides depend on.
 
-Any opcode/payload change must be made in both repos plus `docs/charter-design.md` in the same task (design doc §2.3, §11.6).
+Any opcode/payload change must be made in both repos (plugin + mod) in the same task, with both `.agent/CONTRACTS.md` copies kept identical.
 
 ## The Only Contract: `rhythmc:charter_audio`
 
@@ -26,7 +26,7 @@ Protocol version: `PROTOCOL_VERSION = 1` (fresh baseline; no legacy compatibilit
 | 1 | `HELLO` | `int protocolVersion`, `String modVersion`, `int capabilities` | Sent 1s after JOIN. Retried every 100 ticks until handshake. `caps` bits: 1=SEEK, 2=LOOP, 4=SPEED. |
 | 10 | `TRANSPORT_REQ` | `byte action`, `int bars` | Live (M2). Mod keybind request, always routed through the plugin (never handled locally). Actions: 0=toggle play/pause, 1=previous bar, 2=next bar, 3=set loop A, 4=set loop B, 5=clear loop, 6=stop. `bars` is the bar count for actions 1/2. |
 | 11 | `AUDIO_PUSH_ACK` | `String transferId`, `byte ok`, `String reason` | Audio transfer verification result. `ok=0` carries a human-readable reason. |
-| 103 | `STATE` | `byte playing`, `double positionMs`, `float speed` | Live (M2). Sent every 5 client ticks while `HELLO_ACK.ok=true` and immediately after any transport op. Reconcile data source: the plugin clock is authoritative and corrects the mod. |
+| 103 | `STATE` | `byte playing`, `double positionMs`, `float speed`, `double lengthMs` | Live (M2). Sent every 5 client ticks while `HELLO_ACK.ok=true` and immediately after any transport op. Reconcile data source: the plugin clock is authoritative and corrects the mod. `lengthMs` is the decoded audio duration (0 when nothing is loaded) and drives the plugin's end-of-song stop. |
 | 102 | `CHART_STATUS` | `boolean ok`, `String reason`, `String sha1`, `long lengthMs` | Reserved (V1). |
 | 104 | `PONG` | `long nonce` | Reserved (V1); answers S→C `PING`. |
 | 105 | `ERROR` | `String message` | Human-readable. Plugin logs it and forwards to the sender's chat. |

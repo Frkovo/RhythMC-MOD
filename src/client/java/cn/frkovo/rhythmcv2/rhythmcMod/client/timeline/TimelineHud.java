@@ -7,7 +7,9 @@ import cn.frkovo.rhythmcv2.rhythmcMod.client.net.CharterAudioClient;
 import cn.frkovo.rhythmcv2.rhythmcMod.client.net.ViewState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.ScreenRect;
 import net.minecraft.text.Text;
+import org.joml.Matrix3x2f;
 
 import java.util.List;
 
@@ -35,6 +37,11 @@ public final class TimelineHud {
     private static volatile int zoomIndex = 1;
     /** 手动平移中心（ms）；NaN = 自动跟随播放头/游标。 */
     private static volatile double manualCenterMs = Double.NaN;
+
+    /** 波形显示层 scratch（复用，避免每帧分配）。 */
+    private static float[] waveXs = new float[0];
+    private static float[] waveTops = new float[0];
+    private static float[] waveBottoms = new float[0];
 
     private TimelineHud() {
     }
@@ -187,6 +194,43 @@ public final class TimelineHud {
         drawPanel(context, layout, true, false);
     }
 
+    /**
+     * per-pixel 区间聚合结果 → 连续 RMS 四边形带（无描边）。
+     * 不做任何显示平滑：保留真实瞬态与段内动态。
+     */
+    private static void buildWaveformElement(DrawContext context, Layout layout,
+                                             CharterAudioEngine.WaveformWindow wave) {
+        float[] rms = wave.rms();
+        int columns = rms.length;
+        if (columns < 2) {
+            return;
+        }
+        int points = columns + 1;
+        if (waveXs.length < points) {
+            waveXs = new float[points];
+            waveTops = new float[points];
+            waveBottoms = new float[points];
+        }
+        int mid = layout.y0() + layout.height() / 2;
+        int maxHalf = Math.max(2, layout.height() / 2 - 1);
+        for (int i = 0; i < points; i++) {
+            int c = Math.min(columns - 1, i);
+            int bodyHalf = Math.max(1, Math.round(clamp01(rms[c]) * maxHalf));
+            waveXs[i] = layout.x0() + i;
+            waveTops[i] = mid - bodyHalf;
+            waveBottoms[i] = mid + bodyHalf;
+        }
+        ScreenRect bounds = new ScreenRect(layout.x0(), layout.y0(), layout.width(), layout.height());
+        context.state.addSimpleElement(new WaveformGuiElement(
+                bounds, context.scissorStack.peekLast(),
+                new Matrix3x2f(context.getMatrices()),
+                waveXs, waveTops, waveBottoms, 0x8022AA44));
+    }
+
+    private static float clamp01(float value) {
+        return Math.max(0f, Math.min(1f, value));
+    }
+
     /** 绘制时间轴面板（普通 HUD 与 ALT 调整层共用）。 */
     public static void drawPanel(DrawContext context, Layout layout, boolean showZoomLabel, boolean highlightHover) {
         CharterAudioEngine engine = CharterAudioClient.get().engine();
@@ -199,18 +243,11 @@ public final class TimelineHud {
         context.fill(x0, y0, x1, y0 + 1, 0x55FFFFFF);
         context.fill(x0, y1 - 1, x1, y1, 0x55FFFFFF);
 
-        long lengthMs = layout.lengthMs();
-
-        // 绿色波形（窗口）
-        float[] peaks = engine.waveformWindow(
-                layout.width(), layout.msFrom() / (double) lengthMs, layout.msTo() / (double) lengthMs);
-        if (peaks.length == layout.width()) {
-            int mid = (y0 + y1) / 2;
-            int maxHalf = Math.max(2, (y1 - y0) / 2 - 2);
-            for (int i = 0; i < peaks.length; i++) {
-                int half = Math.max(1, Math.round(peaks[i] * maxHalf));
-                context.fill(x0 + i, mid - half, x0 + i + 1, mid + half, 0x8035C05A);
-            }
+        // 连续 RMS 能量带（pyramid 聚合；一次提交的多边形，无描边、无逐列竖线）
+        CharterAudioEngine.WaveformWindow wave = engine.waveformWindow(
+                layout.width(), Math.round(layout.msFrom()), Math.round(layout.msTo()));
+        if (!wave.isEmpty()) {
+            buildWaveformElement(context, layout, wave);
         }
 
         TimelineGrid grid = layout.grid();

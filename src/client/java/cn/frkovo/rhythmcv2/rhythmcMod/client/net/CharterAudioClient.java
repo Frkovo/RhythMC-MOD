@@ -40,7 +40,10 @@ public final class CharterAudioClient {
     private volatile boolean protocolMismatch;
     private volatile String serverVersion = "";
     private volatile boolean registered;
-    private Path loadedFile;
+    private volatile Path loadedFile;
+    /** 下载完成后的后台解码线程（波形不必等播放）。 */
+    private volatile Thread loadingThread;
+    private final AtomicInteger loadGeneration = new AtomicInteger();
 
     public static CharterAudioClient get() {
         return INSTANCE;
@@ -107,11 +110,65 @@ public final class CharterAudioClient {
         protocolMismatch = false;
         serverVersion = "";
         loadedFile = null;
+        loadGeneration.incrementAndGet();
+        loadingThread = null;
         engine.stop();
         receiver.reset();
         chartMeta.reset();
         chartNotes.reset();
         viewState.reset();
+    }
+
+    /** 下载校验通过后立刻后台解码 + 预构建波形（波形不必等播放）。 */
+    private void ensureAudioLoadedAsync() {
+        Path file = receiver.completedFile();
+        if (file == null || file.equals(loadedFile)) {
+            return;
+        }
+        Thread current = loadingThread;
+        if (current != null && current.isAlive()) {
+            return;
+        }
+        String sha = receiver.completedSha256();
+        int generation = loadGeneration.get();
+        Thread thread = new Thread(() -> {
+            if (engine.load(file, sha) && generation == loadGeneration.get()) {
+                loadedFile = file;
+                engine.prepareWaveform();
+                LOGGER.info("[charter_audio] audio preloaded (waveform ready): {}", file);
+            }
+        }, "CharterAudio-Preload");
+        thread.setDaemon(true);
+        loadingThread = thread;
+        thread.start();
+    }
+
+    /** 播放前确保解码完成：等待后台预载，必要时同步补载。 */
+    private boolean awaitAudioLoaded() {
+        Path file = receiver.completedFile();
+        if (file == null) {
+            return false;
+        }
+        if (file.equals(loadedFile) && engine.isLoaded()) {
+            return true;
+        }
+        Thread current = loadingThread;
+        if (current != null && current.isAlive()) {
+            try {
+                current.join(8000L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        if (file.equals(loadedFile) && engine.isLoaded()) {
+            return true;
+        }
+        if (!engine.load(file, receiver.completedSha256())) {
+            return false;
+        }
+        loadedFile = file;
+        engine.prepareWaveform();
+        return true;
     }
 
     // ---- 发送 ----
@@ -156,7 +213,7 @@ public final class CharterAudioClient {
         send(buf);
     }
 
-    /** STATE(103)：byte playing, double positionMs, float speed。 */
+    /** STATE(103)：byte playing, double positionMs, float speed, double lengthMs（音频时长）。 */
     public void sendState() {
         if (!handshakeOk) {
             return;
@@ -165,6 +222,7 @@ public final class CharterAudioClient {
         buf.writeByte(engine.isPlaying() ? 1 : 0);
         buf.writeDouble(engine.positionMs());
         buf.writeFloat(engine.speed());
+        buf.writeDouble(engine.lengthMs());
         send(buf);
     }
 
@@ -388,20 +446,17 @@ public final class CharterAudioClient {
         if (ok) {
             chat("§a[Charter] 音乐下载完成（sha256 校验通过）");
             LOGGER.info("[charter_audio] download complete: {}", receiver.completedFile());
+            ensureAudioLoadedAsync();
         }
     }
 
     private void playFromServer(long fromMs, float speed) {
-        Path file = receiver.completedFile();
-        if (file == null) {
-            sendError("音频尚未下载完成");
+        if (!awaitAudioLoaded()) {
+            sendError(receiver.completedFile() == null
+                    ? "音频尚未下载完成"
+                    : "音频解码失败（不支持的格式或文件损坏）");
             return;
         }
-        if (!file.equals(loadedFile) && !engine.load(file, receiver.completedSha256())) {
-            sendError("音频解码失败（不支持的格式或文件损坏）");
-            return;
-        }
-        loadedFile = file;
         engine.play(fromMs, speed);
         LOGGER.info("[charter_audio] play from {}ms @{}x", fromMs, speed);
     }

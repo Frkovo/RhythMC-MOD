@@ -64,7 +64,7 @@ Unknown opcodes are ignored. `sessionId` is always `""` and is not validated.
 | C→S | 1 | `HELLO` | `int protocolVersion, String modVersion, int capabilities` |
 | C→S | 10 | `TRANSPORT_REQ` | `byte action, int bars`（键位请求，全部交插件执行；0 播放暂停 1 上一小节 2 下一小节 3 A 4 B 5 清循环 6 停止） |
 | C→S | 11 | `AUDIO_PUSH_ACK` | `String transferId, byte ok, String reason` |
-| C→S | 103 | `STATE` | `byte playing, double positionMs, float speed`（每 5 tick + 状态变更即发，对账数据源） |
+| C→S | 103 | `STATE` | `byte playing, double positionMs, float speed, double lengthMs`（每 5 tick + 状态变更即发；lengthMs=音频时长，驱动曲尾自动停止） |
 | C→S | 105 | `ERROR` | `String message` |
 | S→C | 2 | `CHART_META` | `String songName, long lengthMs, long offsetMs, int bpmCount, {double beat,double bpm}[], int subdivCount, {double startBeat,int noteValue}[]`（当前 Track 分音网格；mod 时间轴 HUD 按它画线） |
 | S→C | 3 | `TRANSPORT_PLAY` | `double fromMs, float speed` |
