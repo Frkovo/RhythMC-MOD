@@ -84,6 +84,14 @@ public final class TimelineAdjustScreen extends Screen {
             return true;
         }
         if (insidePanel(layout, click.x(), click.y())) {
+            // 优先命中事件段端点：打开事件面板并选中该段
+            int hit = TimelineHud.eventEndpointAt(layout, click.x(), click.y());
+            if (hit >= 0) {
+                CharterAudioClient audio = CharterAudioClient.get();
+                audio.setPendingSelect(hit);
+                audio.requestEventList(audio.eventHud().snapshot().channel());
+                return true;
+            }
             seeking = true;
             seekTo(layout, click.x());
             return true;

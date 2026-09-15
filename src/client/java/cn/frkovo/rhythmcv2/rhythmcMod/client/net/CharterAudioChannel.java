@@ -60,7 +60,7 @@ public final class CharterAudioChannel {
     public static final int OP_VIEW_SEEK = 112;
     /** v1.2: 编辑器请求（C→S）：byte action [+ APPLY 载荷]。 */
     public static final int OP_EDIT_REQ = 113;
-    /** v1.2: 编辑状态（S→C）：选中音符属性快照 + undo/redo 可用性。 */
+    /** v1.3: 编辑状态（S→C）：选中音符属性快照 + undo/redo 可用性。 */
     public static final int OP_EDIT_STATE = 114;
 
     // EDIT_REQ action（与插件 CharterAudioBridge 严格一致）
@@ -71,6 +71,33 @@ public final class CharterAudioChannel {
     public static final int EDIT_APPLY = 4;
     public static final int EDIT_DELETE_SELECTED = 5;
     public static final int EDIT_CLONE_TO_NEXT = 6;
+
+    /** v1.3: Track 事件请求（C→S）：byte op [+ 载荷]。 */
+    public static final int OP_EVENT_REQ = 115;
+    /** v1.3: Track 事件状态（S→C）：某 Track 某通道的事件段列表 + 真实速度预览开关。 */
+    public static final int OP_EVENT_STATE = 116;
+    /** v1.3: 事件曲线（S→C）：时间轴 HUD 的当前通道曲线（不塞进每 tick 的 VIEW_STATE）。 */
+    public static final int OP_EVENT_HUD = 117;
+
+    // EVENT_REQ op（与插件 CharterAudioBridge 严格一致）
+    public static final int EVENT_LIST = 0;
+    /** 在某一拍切开该通道（1 段 → 2 段）；载荷 `byte channel, double beat`。 */
+    public static final int EVENT_SPLIT = 1;
+    public static final int EVENT_UPDATE = 2;
+    public static final int EVENT_REMOVE = 3;
+    public static final int EVENT_CLEAR = 4;
+    public static final int EVENT_PREVIEW = 5;
+    public static final int EVENT_CLOSE = 6;
+    /** 试听某段（index >= 0）或从游标播放（index < 0）：`byte channel, int index`。 */
+    public static final int EVENT_AUDITION = 7;
+
+    // EVENT_UPDATE 的 valueMode（与插件 EventRules / EditorTrack.updateEvent 一致）
+    /** 起止值都设（不额外同步）。 */
+    public static final int EVENT_VALUE_BOTH = 0;
+    /** 只设终点值，并把下一段起点值同步为同一值（默认连续）。 */
+    public static final int EVENT_VALUE_END = 1;
+    /** 只设起点值（与前面不连续 → 跳变）。 */
+    public static final int EVENT_VALUE_START = 2;
 
     private CharterAudioChannel() {
     }

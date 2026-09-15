@@ -101,7 +101,6 @@ public final class NoteEditScreen extends Screen {
     private int holdGroupManual = -1;
     private double maxHalfWidth = 2.5d;
     private double maxHalfHeight = 3.0d;
-    private double dodgeScale = 1.5d;
     private double beatStep = 0.25d;
     private boolean canUndo;
     private boolean canRedo;
@@ -413,7 +412,6 @@ public final class NoteEditScreen extends Screen {
         holdGroupManual = state.holdGroupManual();
         maxHalfWidth = state.maxHalfWidth();
         maxHalfHeight = state.maxHalfHeight();
-        dodgeScale = state.dodgeScale();
         if (state.beatStep() > 0 && Math.abs(state.beatStep() - beatStep) > 1.0E-9) {
             beatStep = state.beatStep();
         }
@@ -424,7 +422,7 @@ public final class NoteEditScreen extends Screen {
         CharterAudioClient.get().applyNoteEdit(new EditState.Snapshot(true, "", type, beat,
                 posX, posY, posZ, scaleX, scaleY, scaleZ, rotX, rotY, rotZ,
                 holdGroup, holdGroupSize, holdGroupIndex, holdBoundary, holdGroupManual,
-                maxHalfWidth, maxHalfHeight, dodgeScale, beatStep, canUndo, canRedo));
+                maxHalfWidth, maxHalfHeight, beatStep, canUndo, canRedo));
     }
 
     private void openEditor(Field field, Rect rect) {

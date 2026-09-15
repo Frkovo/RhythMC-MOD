@@ -23,7 +23,7 @@ public final class EditState {
                            float rotX, float rotY, float rotZ,
                            int holdGroup, int holdGroupSize, int holdGroupIndex, int holdBoundary,
                            int holdGroupManual,
-                           double maxHalfWidth, double maxHalfHeight, double dodgeScale, double beatStep,
+                           double maxHalfWidth, double maxHalfHeight, double beatStep,
                            boolean canUndo, boolean canRedo) {
     }
 
@@ -32,7 +32,7 @@ public final class EditState {
     public static Snapshot closed() {
         return new Snapshot(false, "", TYPE_TAP, 0d,
                 0d, 0d, 0d, 1f, 1f, 1f, 0f, 0f, 0f, -1, 1, 0, BOUNDARY_NONE, -1,
-                2.5d, 3.0d, 1.5d, 0.25d, false, false);
+                2.5d, 3.0d, 0.25d, false, false);
     }
 
     public void update(Snapshot snapshot) {

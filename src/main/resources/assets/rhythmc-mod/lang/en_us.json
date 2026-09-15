@@ -7,5 +7,7 @@
   "key.rhythmc-mod.loop_b": "Set Loop B",
   "key.rhythmc-mod.loop_clear": "Clear Loop",
   "key.rhythmc-mod.stop": "Stop",
-  "key.rhythmc-mod.timeline_hud": "Toggle Timeline HUD"
+  "key.rhythmc-mod.timeline_hud": "Toggle Timeline HUD",
+  "key.rhythmc-mod.open_event_panel": "Open Track Event Panel",
+  "key.rhythmc-mod.hint_toggle": "Toggle Key Hints"
 }

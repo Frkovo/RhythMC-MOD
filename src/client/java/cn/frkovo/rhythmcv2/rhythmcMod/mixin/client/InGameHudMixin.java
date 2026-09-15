@@ -1,6 +1,7 @@
 package cn.frkovo.rhythmcv2.rhythmcMod.mixin.client;
 
 import cn.frkovo.rhythmcv2.rhythmcMod.client.audio.DownloadProgressState;
+import cn.frkovo.rhythmcv2.rhythmcMod.client.hud.KeyHintHud;
 import cn.frkovo.rhythmcv2.rhythmcMod.client.timeline.TimelineHud;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
@@ -72,6 +73,11 @@ public class InGameHudMixin {
     @Inject(method = "render", at = @At("TAIL"))
     private void rhythmc$renderTimelineHud(DrawContext context, RenderTickCounter tickCounter, CallbackInfo ci) {
         TimelineHud.render(context);
+    }
+
+    @Inject(method = "render", at = @At("TAIL"))
+    private void rhythmc$renderKeyHint(DrawContext context, RenderTickCounter tickCounter, CallbackInfo ci) {
+        KeyHintHud.render(context);
     }
 
     private static String mb(long bytes) {

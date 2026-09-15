@@ -23,6 +23,8 @@ public final class EditorUiConfig {
     private static boolean loaded;
     private static int panelX = UNSET;
     private static int panelY = UNSET;
+    private static int eventX = UNSET;
+    private static int eventY = UNSET;
 
     private EditorUiConfig() {
     }
@@ -42,13 +44,45 @@ public final class EditorUiConfig {
         return panelY;
     }
 
+    public static boolean hasEventPosition() {
+        ensureLoaded();
+        return eventX != UNSET && eventY != UNSET;
+    }
+
+    public static int eventX() {
+        ensureLoaded();
+        return eventX;
+    }
+
+    public static int eventY() {
+        ensureLoaded();
+        return eventY;
+    }
+
     public static void savePosition(int x, int y) {
         panelX = x;
         panelY = y;
         loaded = true;
+        store();
+    }
+
+    public static void saveEventPosition(int x, int y) {
+        eventX = x;
+        eventY = y;
+        loaded = true;
+        store();
+    }
+
+    private static void store() {
         Properties props = new Properties();
-        props.setProperty("panelX", Integer.toString(x));
-        props.setProperty("panelY", Integer.toString(y));
+        if (panelX != UNSET) {
+            props.setProperty("panelX", Integer.toString(panelX));
+            props.setProperty("panelY", Integer.toString(panelY));
+        }
+        if (eventX != UNSET) {
+            props.setProperty("eventX", Integer.toString(eventX));
+            props.setProperty("eventY", Integer.toString(eventY));
+        }
         Path path = path();
         try {
             Files.createDirectories(path.getParent());
@@ -72,11 +106,27 @@ public final class EditorUiConfig {
         Properties props = new Properties();
         try (InputStream in = Files.newInputStream(path)) {
             props.load(in);
-            panelX = Integer.parseInt(props.getProperty("panelX"));
-            panelY = Integer.parseInt(props.getProperty("panelY"));
-        } catch (IOException | NumberFormatException e) {
+            panelX = parseInt(props, "panelX");
+            panelY = parseInt(props, "panelY");
+            eventX = parseInt(props, "eventX");
+            eventY = parseInt(props, "eventY");
+        } catch (IOException e) {
             panelX = UNSET;
             panelY = UNSET;
+            eventX = UNSET;
+            eventY = UNSET;
+        }
+    }
+
+    private static int parseInt(Properties props, String key) {
+        String raw = props.getProperty(key);
+        if (raw == null) {
+            return UNSET;
+        }
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            return UNSET;
         }
     }
 

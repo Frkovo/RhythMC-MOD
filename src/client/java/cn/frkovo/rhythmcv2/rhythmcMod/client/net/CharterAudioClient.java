@@ -17,6 +17,8 @@ import java.io.DataInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -35,6 +37,10 @@ public final class CharterAudioClient {
     private final ChartNotesState chartNotes = new ChartNotesState();
     private final ViewState viewState = new ViewState();
     private final EditState editState = new EditState();
+    private final EventState eventState = new EventState();
+    private final EventHudState eventHud = new EventHudState();
+    /** 待选中段号（时间轴端点点击 → 事件面板打开时消费）。 */
+    private volatile int pendingSelect = -1;
     private final AtomicInteger tickCounter = new AtomicInteger();
     /** APPLY 节流：拖动中每 tick（≤50ms）最多发一帧，松手/关闭时补发最终值。 */
     private volatile EditState.Snapshot pendingApply;
@@ -74,6 +80,27 @@ public final class CharterAudioClient {
 
     public EditState editState() {
         return editState;
+    }
+
+    public EventState eventState() {
+        return eventState;
+    }
+
+    /** EVENT_HUD(117) 缓存：时间轴 HUD 的当前通道曲线。 */
+    public EventHudState eventHud() {
+        return eventHud;
+    }
+
+    /** 记录「打开事件面板时要选中的段号」（时间轴端点点击用）。 */
+    public void setPendingSelect(int index) {
+        this.pendingSelect = index;
+    }
+
+    /** 取出并清空待选中段号（-1 = 无）。 */
+    public int consumePendingSelect() {
+        int index = pendingSelect;
+        pendingSelect = -1;
+        return index;
     }
 
     public void register() {
@@ -127,6 +154,8 @@ public final class CharterAudioClient {
         chartNotes.reset();
         viewState.reset();
         editState.reset();
+        eventState.reset();
+        eventHud.reset();
         pendingApply = null;
     }
 
@@ -312,8 +341,115 @@ public final class CharterAudioClient {
         send(buf);
     }
 
-    // ---- 接收 ----
+    // ---- Track 事件（EVENT_REQ 115 / EVENT_STATE 116） ----
 
+    /** EVENT_REQ LIST：请求某通道事件列表（同时表示「打开事件面板」）。 */
+    public void requestEventList(int channel) {
+        if (!handshakeOk) {
+            return;
+        }
+        PacketByteBuf buf = frame(CharterAudioChannel.OP_EVENT_REQ);
+        buf.writeByte(CharterAudioChannel.EVENT_LIST);
+        buf.writeByte(channel);
+        send(buf);
+    }
+
+    /** EVENT_REQ SPLIT：在某一拍切开该通道（1 段 → 2 段，曲线形状不变）。 */
+    public void requestEventSplit(int channel, double beat) {
+        if (!handshakeOk) {
+            return;
+        }
+        PacketByteBuf buf = frame(CharterAudioChannel.OP_EVENT_REQ);
+        buf.writeByte(CharterAudioChannel.EVENT_SPLIT);
+        buf.writeByte(channel);
+        buf.writeDouble(beat);
+        send(buf);
+    }
+
+    /**
+     * EVENT_REQ UPDATE：改某段（起止边界 + 起止值 + 缓动）。
+     *
+     * @param valueMode {@link CharterAudioChannel#EVENT_VALUE_BOTH} 起止值都设；
+     *                  {@link CharterAudioChannel#EVENT_VALUE_END} 只设终点值并同步下一段起点值（默认连续）；
+     *                  {@link CharterAudioChannel#EVENT_VALUE_START} 只设起点值（造跳变）
+     */
+    public void requestEventUpdate(int channel, int index, double startBeat, double endBeat,
+                                   double startValue, double endValue, int easing, int valueMode) {
+        if (!handshakeOk) {
+            return;
+        }
+        PacketByteBuf buf = frame(CharterAudioChannel.OP_EVENT_REQ);
+        buf.writeByte(CharterAudioChannel.EVENT_UPDATE);
+        buf.writeByte(channel);
+        buf.writeInt(index);
+        buf.writeDouble(startBeat);
+        buf.writeDouble(endBeat);
+        buf.writeDouble(startValue);
+        buf.writeDouble(endValue);
+        buf.writeInt(easing);
+        buf.writeByte(valueMode);
+        send(buf);
+    }
+
+    /** EVENT_REQ REMOVE：删除第 index 段。 */
+    public void requestEventRemove(int channel, int index) {
+        if (!handshakeOk) {
+            return;
+        }
+        PacketByteBuf buf = frame(CharterAudioChannel.OP_EVENT_REQ);
+        buf.writeByte(CharterAudioChannel.EVENT_REMOVE);
+        buf.writeByte(channel);
+        buf.writeInt(index);
+        send(buf);
+    }
+
+    /** EVENT_REQ CLEAR：清空某通道。 */
+    public void requestEventClear(int channel) {
+        if (!handshakeOk) {
+            return;
+        }
+        PacketByteBuf buf = frame(CharterAudioChannel.OP_EVENT_REQ);
+        buf.writeByte(CharterAudioChannel.EVENT_CLEAR);
+        buf.writeByte(channel);
+        send(buf);
+    }
+
+    /** EVENT_REQ PREVIEW：真实速度预览开关。 */
+    public void requestEventPreview(int channel, boolean on) {
+        if (!handshakeOk) {
+            return;
+        }
+        PacketByteBuf buf = frame(CharterAudioChannel.OP_EVENT_REQ);
+        buf.writeByte(CharterAudioChannel.EVENT_PREVIEW);
+        buf.writeByte(channel);
+        buf.writeByte(on ? 1 : 0);
+        send(buf);
+    }
+
+    /** EVENT_REQ CLOSE：玩家关掉了事件面板（服务端据此停止「保持打开」）。 */
+    public void requestEventClose(int channel) {
+        if (!handshakeOk) {
+            return;
+        }
+        PacketByteBuf buf = frame(CharterAudioChannel.OP_EVENT_REQ);
+        buf.writeByte(CharterAudioChannel.EVENT_CLOSE);
+        buf.writeByte(channel);
+        send(buf);
+    }
+
+    /** EVENT_REQ AUDITION：试听某段（index >= 0）或从当前游标播放（index < 0）。 */
+    public void requestEventAudition(int channel, int index) {
+        if (!handshakeOk) {
+            return;
+        }
+        PacketByteBuf buf = frame(CharterAudioChannel.OP_EVENT_REQ);
+        buf.writeByte(CharterAudioChannel.EVENT_AUDITION);
+        buf.writeByte(channel);
+        buf.writeInt(index);
+        send(buf);
+    }
+
+    // ---- 接收 ----
     private void handleServerPacket(PacketByteBuf payload) {
         try {
             byte[] bytes = new byte[payload.readableBytes()];
@@ -327,6 +463,8 @@ public final class CharterAudioClient {
                 case CharterAudioChannel.OP_CHART_NOTES -> handleChartNotes(in);
                 case CharterAudioChannel.OP_VIEW_STATE -> handleViewState(in);
                 case CharterAudioChannel.OP_EDIT_STATE -> handleEditState(in);
+                case CharterAudioChannel.OP_EVENT_STATE -> handleEventState(in);
+                case CharterAudioChannel.OP_EVENT_HUD -> handleEventHud(in);
                 case CharterAudioChannel.OP_AUDIO_PUSH_START -> handlePushStart(in);
                 case CharterAudioChannel.OP_AUDIO_PUSH_CHUNK -> handlePushChunk(in);
                 case CharterAudioChannel.OP_AUDIO_PUSH_END -> handlePushEnd(in);
@@ -490,7 +628,6 @@ public final class CharterAudioClient {
         int holdGroupManual = in.readInt();
         double maxHalfWidth = in.readDouble();
         double maxHalfHeight = in.readDouble();
-        double dodgeScale = in.readDouble();
         double beatStep = in.readDouble();
         boolean canUndo = in.readBoolean();
         boolean canRedo = in.readBoolean();
@@ -504,9 +641,66 @@ public final class CharterAudioClient {
                 holdGroup, holdGroupSize, holdGroupIndex, holdBoundary, holdGroupManual,
                 maxHalfWidth > 0 ? maxHalfWidth : 2.5d,
                 maxHalfHeight > 0 ? maxHalfHeight : 3.0d,
-                dodgeScale > 0 ? dodgeScale : 1.5d,
                 beatStep > 0 ? beatStep : 0.25d,
                 canUndo, canRedo));
+    }
+
+    /** EVENT_STATE(116)：boolean ok, String reason, int trackId, byte channel, byte preview, int count, {5 字段}[]. */
+    private void handleEventState(DataInputStream in) throws IOException {
+        boolean ok = in.readBoolean();
+        String reason = readUtf8(in);
+        int trackId = in.readInt();
+        int channel = in.readByte();
+        boolean preview = in.readByte() != 0;
+        boolean panel = in.readByte() != 0;
+        int selectIndex = in.readInt();
+        int count = in.readInt();
+        if (count < 0 || count > 4096) {
+            throw new IOException("EVENT_STATE 非法段数: " + count);
+        }
+        List<EventState.Event> events = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            double startBeat = in.readDouble();
+            double endBeat = in.readDouble();
+            double startValue = in.readDouble();
+            double endValue = in.readDouble();
+            int easing = in.readInt();
+            if (!Double.isFinite(startBeat) || !Double.isFinite(endBeat)
+                    || !Double.isFinite(startValue) || !Double.isFinite(endValue)) {
+                throw new IOException("EVENT_STATE 非法数值段 #" + i);
+            }
+            events.add(new EventState.Event(startBeat, endBeat, startValue, endValue, Easing.clamp(easing)));
+        }
+        eventState.update(new EventState.Snapshot(ok, reason == null ? "" : reason,
+                trackId, channel, preview, panel, selectIndex, List.copyOf(events)));
+        if (!ok && reason != null && !reason.isBlank()) {
+            chat("[RhythMC] " + reason);
+        }
+    }
+
+    /** EVENT_HUD(117)：int trackId, byte channel, byte preview, int count, {double×4, byte easing}[]. */
+    private void handleEventHud(DataInputStream in) throws IOException {
+        int trackId = in.readInt();
+        int channel = in.readByte();
+        boolean preview = in.readByte() != 0;
+        int count = in.readInt();
+        if (count < 0 || count > EventHudState.maxEvents()) {
+            throw new IOException("EVENT_HUD 非法段数: " + count);
+        }
+        List<EventHudState.Segment> segments = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            double startBeat = in.readDouble();
+            double endBeat = in.readDouble();
+            double startValue = in.readDouble();
+            double endValue = in.readDouble();
+            int easing = in.readByte();
+            if (!Double.isFinite(startBeat) || !Double.isFinite(endBeat)
+                    || !Double.isFinite(startValue) || !Double.isFinite(endValue)) {
+                throw new IOException("EVENT_HUD 非法数值段 #" + i);
+            }
+            segments.add(new EventHudState.Segment(startBeat, endBeat, startValue, endValue, Easing.clamp(easing)));
+        }
+        eventHud.update(new EventHudState.Snapshot(trackId, channel, preview, List.copyOf(segments)));
     }
 
     private void handlePushStart(DataInputStream in) throws IOException {

@@ -4,6 +4,8 @@ import cn.frkovo.rhythmcv2.rhythmcMod.client.audio.CharterAudioEngine;
 import cn.frkovo.rhythmcv2.rhythmcMod.client.net.ChartMetaState;
 import cn.frkovo.rhythmcv2.rhythmcMod.client.net.ChartNotesState;
 import cn.frkovo.rhythmcv2.rhythmcMod.client.net.CharterAudioClient;
+import cn.frkovo.rhythmcv2.rhythmcMod.client.net.EasingCurve;
+import cn.frkovo.rhythmcv2.rhythmcMod.client.net.EventHudState;
 import cn.frkovo.rhythmcv2.rhythmcMod.client.net.ViewState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
@@ -231,6 +233,265 @@ public final class TimelineHud {
         return Math.max(0f, Math.min(1f, value));
     }
 
+    // ------------------------------------------------------------------
+    // 事件曲线（EVENT_HUD 117）
+    // ------------------------------------------------------------------
+
+    /** 通道曲线配色（与插件 EventRenderer.channelColor 一致）。 */
+    public static int channelColor(int channel) {
+        return switch (Math.floorMod(channel, 10)) {
+            case 0 -> 0xFF00DCC8;
+            case 1 -> 0xFFFF6E6E;
+            case 2 -> 0xFF78FF8C;
+            case 3 -> 0xFF6EA0FF;
+            case 4 -> 0xFFFFC850;
+            case 5 -> 0xFFE6E650;
+            case 6 -> 0xFFFF963C;
+            case 7 -> 0xFFDC82FF;
+            case 8 -> 0xFFB46EFF;
+            case 9 -> 0xFFFF78DC;
+            default -> 0xFFFFFFFF;
+        };
+    }
+
+    /** 通道中性值（与插件 EventRenderer.midValue 一致）：流速/缩放 1.0（常态），其余 0。 */
+    private static double neutralValue(int channel) {
+        return switch (Math.floorMod(channel, 10)) {
+            case 0, 4, 5, 6 -> 1d;
+            default -> 0d;
+        };
+    }
+
+    /** 通道名（与插件 EventChannel.label 一致）。 */
+    private static String channelLabel(int channel) {
+        return switch (Math.floorMod(channel, 10)) {
+            case 0 -> "流速";
+            case 1 -> "X 位移";
+            case 2 -> "Y 位移";
+            case 3 -> "Z 位移";
+            case 4 -> "X 缩放";
+            case 5 -> "Y 缩放";
+            case 6 -> "Z 缩放";
+            case 7 -> "X 旋转";
+            case 8 -> "Y 旋转";
+            default -> "Z 旋转";
+        };
+    }
+
+    /** 通道单位后缀（与插件一致：流速是倍率）。 */
+    private static String channelUnit(int channel) {
+        return switch (Math.floorMod(channel, 10)) {
+            case 0 -> "×";
+            case 4, 5, 6 -> "倍";
+            case 7, 8, 9 -> "度";
+            default -> "格";
+        };
+    }
+
+    /**
+     * 窗口内自适应归一化（展示趋势）：返回 {@code {min, max, flatFlag}}，
+     * 取值范围 = 窗口采样值 ∪ 通道中性值，再留 10% 边距。
+     */
+    /**
+     * 纵向归一化（**绝对**：按整条通道的所有段，不随 HUD 窗口/播放头变化）：
+     * 返回 {@code {min, max, flatFlag}}，取值范围 = 全通道采样值 ∪ 通道中性值，再留 10% 边距。
+     */
+    private static double[] fitScale(EventHudState.Snapshot hud) {
+        double neutral = neutralValue(hud.channel());
+        double min = neutral;
+        double max = neutral;
+        for (EventHudState.Segment segment : hud.segments()) {
+            for (int i = 0; i <= 33; i++) {
+                double beat = segment.startBeat() + (segment.endBeat() - segment.startBeat()) * i / 33d;
+                double value = segmentValue(segment, beat);
+                if (!Double.isFinite(value)) {
+                    continue;
+                }
+                min = Math.min(min, value);
+                max = Math.max(max, value);
+            }
+        }
+        double range = max - min;
+        if (range < 1.0E-9d) {
+            return new double[]{min, max, 1d};
+        }
+        double pad = range * 0.1d;
+        return new double[]{min - pad, max + pad, 0d};
+    }
+
+    /** 某拍处的通道取值（按段取值 + 缓动；跳变从该拍起生效）。 */
+    private static double valueAtBeat(EventHudState.Snapshot hud, double beat) {
+        EventHudState.Segment previous = null;
+        for (EventHudState.Segment segment : hud.segments()) {
+            if (segment.jump()) {
+                if (segment.startBeat() <= beat + 1.0E-6d) {
+                    previous = segment;
+                }
+                continue;
+            }
+            if (beat <= segment.endBeat() + 1.0E-6d && beat >= segment.startBeat() - 1.0E-6d) {
+                return segmentValue(segment, beat);
+            }
+            if (beat > segment.endBeat()) {
+                previous = segment;
+            }
+        }
+        return previous == null ? neutralValue(hud.channel()) : previous.endValue();
+    }
+
+    /** 数值 → 曲线带内 y 像素（按窗口归一化映射，超出钳到边缘）。 */
+    private static int yFor(double value, double[] fit, int top, int bottom) {
+        double center = (top + bottom) / 2d;
+        double half = Math.max(1d, (bottom - top) / 2d);
+        if (fit[2] > 0.5d) {
+            return (int) Math.round(center);
+        }
+        double t = (value - fit[0]) / Math.max(1.0E-9d, fit[1] - fit[0]) * 2d - 1d;
+        t = Math.max(-1d, Math.min(1d, t));
+        return (int) Math.round(center - t * half);
+    }
+
+    /** 段内取值（缓动与插件同表）。 */
+    private static double segmentValue(EventHudState.Segment segment, double beat) {
+        if (segment.jump()) {
+            return segment.endValue();
+        }
+        double t = (beat - segment.startBeat()) / Math.max(1.0E-6d, segment.endBeat() - segment.startBeat());
+        return EasingCurve.ease(segment.startValue(), segment.endValue(),
+                Math.max(0d, Math.min(1d, t)), segment.easing());
+    }
+
+    private static String shortValue(double value) {
+        double abs = Math.abs(value);
+        if (abs >= 1000d) {
+            return String.format(java.util.Locale.ROOT, "%.0f", value);
+        }
+        if (abs >= 10d) {
+            return String.format(java.util.Locale.ROOT, "%.2f", value);
+        }
+        return String.format(java.util.Locale.ROOT, "%.3f", value);
+    }
+
+    /** 在时间轴上叠加当前通道的事件曲线（折线 + 端点方块 + 跳变竖线 + 中性参考线 + 通道标签）。 */
+    public static void drawEventCurve(DrawContext context, Layout layout) {
+        EventHudState.Snapshot hud = CharterAudioClient.get().eventHud().snapshot();
+        if (hud.trackId() < 0 || hud.segments().isEmpty()) {
+            return;
+        }
+        TimelineGrid grid = layout.grid();
+        if (grid == null || !grid.isUsable()) {
+            return;
+        }
+        int x0 = layout.x0();
+        int x1 = x0 + layout.width();
+        int top = layout.y0() + 2;
+        int bottom = layout.y0() + Math.max(6, layout.height() - 7);
+        int color = channelColor(hud.channel());
+        int channel = hud.channel();
+        double[] fit = fitScale(hud);
+
+        // 中性参考虚线（同一归一化映射）
+        double neutral = neutralValue(channel);
+        int neutralY = yFor(neutral, fit, top, bottom);
+        for (int x = x0; x <= x1; x += 6) {
+            context.fill(x, neutralY, x + 2, neutralY + 1, 0x60AAAAAA);
+        }
+
+        int previousX = Integer.MIN_VALUE;
+        int previousY = 0;
+        java.util.List<EventHudState.Segment> segments = hud.segments();
+        for (int i = 0; i < segments.size(); i++) {
+            EventHudState.Segment segment = segments.get(i);
+            double msA = grid.msAtBeat(Math.max(0d, segment.startBeat()));
+            double msB = grid.msAtBeat(Math.max(0d, segment.endBeat()));
+            if (msB < layout.msFrom() || msA > layout.msTo()) {
+                continue;
+            }
+            int fromX = Math.max(x0, layout.xForMs(msA));
+            int toX = Math.min(x1, layout.xForMs(Math.max(msA, msB)));
+            if (toX <= fromX) {
+                toX = Math.min(x1, fromX + 1);
+            }
+            previousX = Integer.MIN_VALUE;
+            for (int x = fromX; x <= toX; x++) {
+                double beat = grid.beatAtMs(layout.msForX(x));
+                int y = yFor(valueAtBeat(hud, beat), fit, top, bottom);
+                if (previousX != Integer.MIN_VALUE) {
+                    int lo = Math.min(previousY, y);
+                    int hi = Math.max(previousY, y);
+                    context.fill(x, lo, x + 1, hi + 1, color);
+                } else {
+                    context.fill(x, y, x + 1, y + 1, color);
+                }
+                previousX = x;
+                previousY = y;
+            }
+            // 边界不连续（跳变）：在公共边界拍画一条竖线
+            if (i + 1 < segments.size()
+                    && Math.abs(segment.endValue() - segments.get(i + 1).startValue()) > 1.0E-6d) {
+                int x = Math.max(x0, Math.min(x1 - 1, layout.xForMs(msB)));
+                int yA = yFor(segment.endValue(), fit, top, bottom);
+                int yB = yFor(segments.get(i + 1).startValue(), fit, top, bottom);
+                context.fill(x, Math.min(yA, yB), x + 1, Math.max(yA, yB) + 1, color);
+            }
+            endpointSquare(context, layout, x0, x1, fit, color, segment.startBeat(), segment.startValue());
+            if (!segment.jump()) {
+                endpointSquare(context, layout, x0, x1, fit, color, segment.endBeat(), segment.endValue());
+            }
+        }
+
+        // 通道标签 + 本次显示范围（让归一化透明）
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client != null && client.textRenderer != null) {
+            String unit = channelUnit(channel);
+            String label = channelLabel(channel) + "（" + unit + "） · 显示 "
+                    + shortValue(fit[0]) + "–" + shortValue(fit[1]) + unit;
+            context.drawText(client.textRenderer, Text.literal(label), x0 + 2, top, color, true);
+        }
+    }
+
+    private static void endpointSquare(DrawContext context, Layout layout, int x0, int x1, double[] fit,
+                                       int color, double beat, double value) {
+        TimelineGrid grid = layout.grid();
+        if (grid == null) {
+            return;
+        }
+        int x = layout.xForMs(grid.msAtBeat(Math.max(0d, beat)));
+        if (x < x0 || x > x1) {
+            return;
+        }
+        int top = layout.y0() + 2;
+        int bottom = layout.y0() + Math.max(6, layout.height() - 7);
+        int y = yFor(value, fit, top, bottom);
+        context.fill(x - 1, y - 1, x + 2, y + 2,
+                (color & 0x00FFFFFF) | 0xC0000000);
+    }
+
+    /** 鼠标是否点在某个段端点上（返回段号，-1 = 未命中）。 */
+    public static int eventEndpointAt(Layout layout, double mouseX, double mouseY) {
+        EventHudState.Snapshot hud = CharterAudioClient.get().eventHud().snapshot();
+        if (hud.trackId() < 0 || hud.segments().isEmpty()) {
+            return -1;
+        }
+        TimelineGrid grid = layout.grid();
+        if (grid == null || !grid.isUsable()) {
+            return -1;
+        }
+        if (mouseY < layout.y0() || mouseY > layout.y0() + layout.height()) {
+            return -1;
+        }
+        for (int i = 0; i < hud.segments().size(); i++) {
+            EventHudState.Segment segment = hud.segments().get(i);
+            for (double beat : new double[]{segment.startBeat(), segment.endBeat()}) {
+                int x = layout.xForMs(grid.msAtBeat(Math.max(0d, beat)));
+                if (Math.abs(mouseX - x) <= 3d) {
+                    return i;
+                }
+            }
+        }
+        return -1;
+    }
+
     /** 绘制时间轴面板（普通 HUD 与 ALT 调整层共用）。 */
     public static void drawPanel(DrawContext context, Layout layout, boolean showZoomLabel, boolean highlightHover) {
         CharterAudioEngine engine = CharterAudioClient.get().engine();
@@ -420,6 +681,9 @@ public final class TimelineHud {
             context.fill(px - 1, y0, px + 1, y1, 0xFFFF4040);
             context.fill(px - 3, y0 - 4, px + 3, y0, 0xFFFF4040);
         }
+
+        // 当前通道的事件曲线（EVENT_HUD 117）：折线 + 端点方块 + 跳变竖线
+        drawEventCurve(context, layout);
 
         // 底部滑轴（整曲缩略 + 窗口框）
         if (layout.scrollHeight() > 0) {

@@ -2,7 +2,8 @@ package cn.frkovo.rhythmcv2.rhythmcMod.client.input;
 
 import cn.frkovo.rhythmcv2.rhythmcMod.client.net.CharterAudioChannel;
 import cn.frkovo.rhythmcv2.rhythmcMod.client.net.CharterAudioClient;
-import cn.frkovo.rhythmcv2.rhythmcMod.client.net.EditState;
+import cn.frkovo.rhythmcv2.rhythmcMod.client.net.EventState;
+import cn.frkovo.rhythmcv2.rhythmcMod.client.edit.EventEditScreen;
 import cn.frkovo.rhythmcv2.rhythmcMod.client.edit.NoteEditScreen;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.MinecraftClient;
@@ -35,9 +36,10 @@ public final class EditInput {
                 yWasDown = false;
                 return;
             }
-            // 属性面板打开时仍允许撤销/重做（就地输入框聚焦中除外）
+            // 属性面板/事件面板打开时仍允许撤销/重做（就地输入框聚焦中除外）
             if (client.currentScreen != null
-                    && (!(client.currentScreen instanceof NoteEditScreen screen) || screen.isTextEditing())) {
+                    && (!(client.currentScreen instanceof NoteEditScreen noteScreen) || noteScreen.isTextEditing())
+                    && (!(client.currentScreen instanceof EventEditScreen eventScreen) || eventScreen.isTextEditing())) {
                 zWasDown = false;
                 yWasDown = false;
                 return;
@@ -67,19 +69,35 @@ public final class EditInput {
         });
     }
 
-    /** 服务端选中状态驱动的面板开关（面板自己处理 Esc/关闭时的取消选中）。 */
+    /** 服务端选中/事件状态驱动的面板开关（面板自己处理 Esc/关闭时的取消选中）。 */
     private static void syncScreen(MinecraftClient client) {
         if (client.player == null) {
             return;
         }
-        EditState.Snapshot state = CharterAudioClient.get().editState().snapshot();
-        boolean open = state.ok();
+        CharterAudioClient audio = CharterAudioClient.get();
+        boolean noteOpen = audio.editState().snapshot().ok();
+        EventState.Snapshot event = audio.eventState().snapshot();
         Screen current = client.currentScreen;
-        boolean showing = current instanceof NoteEditScreen;
-        if (open && current == null) {
-            client.setScreen(new NoteEditScreen());
-        } else if (!open && showing) {
+        if (noteOpen) {
+            if (current == null) {
+                client.setScreen(new NoteEditScreen());
+                return;
+            }
+            if (!(current instanceof NoteEditScreen)) {
+                return;
+            }
+        } else if (current instanceof NoteEditScreen) {
             client.setScreen(null);
+            current = null;
+        }
+        if (current instanceof EventEditScreen) {
+            if (!event.ok() || !event.panel()) {
+                client.setScreen(null);
+            }
+            return;
+        }
+        if (event.ok() && event.panel() && current == null) {
+            client.setScreen(new EventEditScreen());
         }
     }
 
