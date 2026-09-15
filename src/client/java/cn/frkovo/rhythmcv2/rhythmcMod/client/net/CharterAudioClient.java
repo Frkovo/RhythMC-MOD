@@ -34,7 +34,10 @@ public final class CharterAudioClient {
     private final ChartMetaState chartMeta = new ChartMetaState();
     private final ChartNotesState chartNotes = new ChartNotesState();
     private final ViewState viewState = new ViewState();
+    private final EditState editState = new EditState();
     private final AtomicInteger tickCounter = new AtomicInteger();
+    /** APPLY 节流：拖动中每 tick（≤50ms）最多发一帧，松手/关闭时补发最终值。 */
+    private volatile EditState.Snapshot pendingApply;
 
     private volatile boolean handshakeOk;
     private volatile boolean protocolMismatch;
@@ -67,6 +70,10 @@ public final class CharterAudioClient {
 
     public ViewState viewState() {
         return viewState;
+    }
+
+    public EditState editState() {
+        return editState;
     }
 
     public void register() {
@@ -102,6 +109,8 @@ public final class CharterAudioClient {
             if (handshakeOk && tick % 5 == 0) {
                 sendState();
             }
+            // APPLY 节流：拖动中每 tick 最多一帧
+            flushNoteEdit();
         });
     }
 
@@ -117,6 +126,8 @@ public final class CharterAudioClient {
         chartMeta.reset();
         chartNotes.reset();
         viewState.reset();
+        editState.reset();
+        pendingApply = null;
     }
 
     /** 下载校验通过后立刻后台解码 + 预构建波形（波形不必等播放）。 */
@@ -257,6 +268,50 @@ public final class CharterAudioClient {
         send(buf);
     }
 
+    /** EDIT_REQ(113)：编辑器动作（中键选中/撤销/重做/取消选中/删除/复制）。 */
+    public void requestEdit(int action) {
+        LOGGER.info("[charter_audio] EDIT_REQ action={}", action);
+        if (!handshakeOk) {
+            return;
+        }
+        PacketByteBuf buf = frame(CharterAudioChannel.OP_EDIT_REQ);
+        buf.writeByte(action);
+        send(buf);
+    }
+
+    /** EDIT_REQ(113) APPLY：把面板上的属性推给插件（节流，见 {@link #flushNoteEdit()}）。 */
+    public void applyNoteEdit(EditState.Snapshot properties) {
+        if (!handshakeOk) {
+            return;
+        }
+        pendingApply = properties;
+    }
+
+    /** 立即补发最后一次 APPLY（拖动松手 / 关闭面板时调用）。 */
+    public void flushNoteEdit() {
+        EditState.Snapshot pending = pendingApply;
+        if (pending == null || !handshakeOk) {
+            return;
+        }
+        pendingApply = null;
+        PacketByteBuf buf = frame(CharterAudioChannel.OP_EDIT_REQ);
+        buf.writeByte(CharterAudioChannel.EDIT_APPLY);
+        buf.writeByte(pending.type());
+        buf.writeDouble(pending.beat());
+        buf.writeDouble(pending.posX());
+        buf.writeDouble(pending.posY());
+        buf.writeDouble(pending.posZ());
+        buf.writeFloat(pending.scaleX());
+        buf.writeFloat(pending.scaleY());
+        buf.writeFloat(pending.scaleZ());
+        buf.writeFloat(pending.rotX());
+        buf.writeFloat(pending.rotY());
+        buf.writeFloat(pending.rotZ());
+        buf.writeByte(pending.holdBoundary());
+        buf.writeInt(pending.holdGroupManual());
+        send(buf);
+    }
+
     // ---- 接收 ----
 
     private void handleServerPacket(PacketByteBuf payload) {
@@ -271,6 +326,7 @@ public final class CharterAudioClient {
                 case CharterAudioChannel.OP_CHART_META -> handleChartMeta(in);
                 case CharterAudioChannel.OP_CHART_NOTES -> handleChartNotes(in);
                 case CharterAudioChannel.OP_VIEW_STATE -> handleViewState(in);
+                case CharterAudioChannel.OP_EDIT_STATE -> handleEditState(in);
                 case CharterAudioChannel.OP_AUDIO_PUSH_START -> handlePushStart(in);
                 case CharterAudioChannel.OP_AUDIO_PUSH_CHUNK -> handlePushChunk(in);
                 case CharterAudioChannel.OP_AUDIO_PUSH_END -> handlePushEnd(in);
@@ -407,6 +463,50 @@ public final class CharterAudioClient {
             return;
         }
         viewState.update(Math.max(0, zoomIndex), barBlocks, levelCount, Math.max(0d, cursorMs));
+    }
+
+    /** EDIT_STATE(114)：选中音符属性快照（ok=false = 无选中/已关闭）。 */
+    private void handleEditState(DataInputStream in) throws IOException {
+        if (!handshakeOk) {
+            return;
+        }
+        boolean ok = in.readBoolean();
+        String reason = readUtf8(in);
+        int type = in.readByte() & 0xFF;
+        double beat = in.readDouble();
+        double posX = in.readDouble();
+        double posY = in.readDouble();
+        double posZ = in.readDouble();
+        float scaleX = in.readFloat();
+        float scaleY = in.readFloat();
+        float scaleZ = in.readFloat();
+        float rotX = in.readFloat();
+        float rotY = in.readFloat();
+        float rotZ = in.readFloat();
+        int holdGroup = in.readInt();
+        int holdGroupSize = in.readInt();
+        int holdGroupIndex = in.readInt();
+        int holdBoundary = in.readByte();
+        int holdGroupManual = in.readInt();
+        double maxHalfWidth = in.readDouble();
+        double maxHalfHeight = in.readDouble();
+        double dodgeScale = in.readDouble();
+        double beatStep = in.readDouble();
+        boolean canUndo = in.readBoolean();
+        boolean canRedo = in.readBoolean();
+        if (ok && (type > 3 || !Double.isFinite(beat) || beat < 0
+                || !(maxHalfWidth > 0) || !(maxHalfHeight > 0) || !(beatStep > 0))) {
+            return;
+        }
+        editState.update(new EditState.Snapshot(ok, reason == null ? "" : reason, ok ? type : 0,
+                ok ? beat : 0d, posX, posY, posZ,
+                scaleX, scaleY, scaleZ, rotX, rotY, rotZ,
+                holdGroup, holdGroupSize, holdGroupIndex, holdBoundary, holdGroupManual,
+                maxHalfWidth > 0 ? maxHalfWidth : 2.5d,
+                maxHalfHeight > 0 ? maxHalfHeight : 3.0d,
+                dodgeScale > 0 ? dodgeScale : 1.5d,
+                beatStep > 0 ? beatStep : 0.25d,
+                canUndo, canRedo));
     }
 
     private void handlePushStart(DataInputStream in) throws IOException {

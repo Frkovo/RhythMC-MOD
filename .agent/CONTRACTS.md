@@ -1,6 +1,6 @@
 # Contract Map
 
-Updated: 2026-09-12 (RMCD format; CHART_NOTES; VIEW_ZOOM/VIEW_STATE/VIEW_SEEK)
+Updated: 2026-09-13 (note editing: EDIT_REQ/EDIT_STATE; RMCD format; CHART_NOTES; VIEW_ZOOM/VIEW_STATE/VIEW_SEEK)
 
 ## Contract Change Definition
 
@@ -32,6 +32,7 @@ Protocol version: `PROTOCOL_VERSION = 1` (fresh baseline; no legacy compatibilit
 | 105 | `ERROR` | `String message` | Human-readable. Plugin logs it and forwards to the sender's chat. |
 | 110 | `VIEW_ZOOM` | `byte direction` | Live (v1.1). Mod world-grid zoom request (SHIFT+wheel). `+1` = finer (more blocks per bar), `-1` = coarser; the plugin clamps to `editor.grid.zoom-levels`. |
 | 112 | `VIEW_SEEK` | `double toMs` | Live (v1.1). Timeline click/drag seek from the ALT adjust overlay. The plugin runs its normal seek path (play/pause/edit); in edit mode it moves the cursor. |
+| 113 | `EDIT_REQ` | `byte action` + per-action payload | Live (v1.2). Editor requests handled by the plugin session: `0 OPEN_NOTE_GUI` (pick the note under the crosshair, current track only, and open the property panel), `1 UNDO`, `2 REDO`, `3 DESELECT`, `4 APPLY` (`byte type`, `double beat`, `posX`, `posY`, `posZ`, `float scaleX`, `scaleY`, `scaleZ`, `rotX`, `rotY`, `rotZ`, `byte holdBoundary`, `int holdGroupManual`), `5 DELETE_SELECTED`, `6 CLONE_TO_NEXT`. `holdBoundary` is `0` auto / `1` chain head / `2` chain tail; `holdGroupManual` is `-1` auto or an explicit group id (`>= 0`) that wins over auto-chaining and may merge non-adjacent / cross-lane HOLD notes. APPLY is throttled client-side (at most one frame per client tick) and validated server-side (position clamped free-form, rotation ±180°, scale 0.1–3.0, `posZ` ±3, HOLD keeps `posY=-1` and rejects conversion unless the note already sits at `Y=-1`).
 
 ### Direction Server → Client
 
@@ -51,6 +52,7 @@ Protocol version: `PROTOCOL_VERSION = 1` (fresh baseline; no legacy compatibilit
 | 108 | `AUDIO_PUSH_END` | `String transferId` | Client then verifies and responds `AUDIO_PUSH_ACK`. |
 | 109 | `CHART_NOTES` | `int noteCount`, `{double beat, byte type}` × noteCount | Full snapshot for the mod timeline HUD, ascending by beat, `type` = `NoteType` ordinal (0=TAP, 1=LOOK, 2=HOLD, 3=DODGE), capped at 65536 markers. Sent on the mod-ready edge, on play start and after every note change. The mod replaces its cache or drops the whole frame when malformed. |
 | 111 | `VIEW_STATE` | `int zoomIndex`, `double barBlocks`, `int levelCount`, `double cursorMs` | Live (v1.1). Sent on the mod-ready edge, on zoom change and periodically while editing. Feeds the timeline HUD window center (`cursorMs`) and the current world-grid zoom display. |
+| 114 | `EDIT_STATE` | `boolean ok`, `String reason`, `byte type`, `double beat`, `double posX`, `double posY`, `double posZ`, `float scaleX`, `float scaleY`, `float scaleZ`, `float rotX`, `float rotY`, `float rotZ`, `int holdGroup`, `int holdGroupSize`, `int holdGroupIndex`, `byte holdBoundary`, `int holdGroupManual`, `double maxHalfWidth`, `double maxHalfHeight`, `double dodgeScale`, `double beatStep`, `boolean canUndo`, `boolean canRedo` | Live (v1.2). Selected-note snapshot + edit bounds + undo/redo availability. Sent on select, on every APPLY echo, after undo/redo, on active-track change, after delete and on session close/play start. `ok=false` = nothing selected, so the mod closes the panel. `holdGroup` is the resolved group id (`-1` = standalone), `holdGroupManual` the explicit override (`-1` = auto); `holdGroupSize/Index` describe the chain position (the panel shows 组号 + 头/身/尾 read-only). `beatStep` is the subdivision step at the selected beat; malformed frames are dropped. |
 
 ### Chunking
 
@@ -87,6 +89,7 @@ All payloads use plugin-channel raw bytes. The frame is a big-endian `int` opcod
 10. Player quit cancels any incomplete transfer and tears down the session; rejoin restarts from 0 (no resume).
 11. If no ACK arrives within 30s after `AUDIO_PUSH_END`, the server marks the push failed and notifies via `ERROR(105)`.
 12. Timeline HUD data: `CHART_META(2)`, `CHART_NOTES(109)` and `VIEW_STATE(111)` are sent when the mod becomes ready and on play start; `CHART_NOTES` also after every note change, `CHART_META` after BPM edits, `VIEW_STATE` on zoom change and periodically while editing. All are full snapshots; the mod never requests them.
+13. Note editing: the mod sends `EDIT_REQ(0)` on middle-click; the plugin picks the note under the crosshair (current track only), stores the selection and answers `EDIT_STATE(ok=1)`, which opens the mod property panel (draggable, position persisted in the mod config dir). Panel changes go back as `EDIT_REQ(4 APPLY)`; the plugin validates/clamps, mutates the model, updates the affected track runtime **in place** (no display re-creation, so no flicker) and echoes `EDIT_STATE`. `EDIT_REQ(4 APPLY)` while nothing is selected just answers `ok=false`. HOLD conversion is refused unless the note already sits at `Y=-1`; HOLD chains are auto-grouped from consecutive HOLD notes (same lane, next subdivision point), can be cut with the `holdBoundary` head/tail flags, and can be overridden with an explicit `holdGroupManual` id (merges non-adjacent / cross-lane notes; auto groups then extend the manual group and skip its id). Every mutation (placement, chain placement, deletion, type/transform edits, clone, BPM, subdivisions, track CRUD) pushes a deep-copied chart snapshot onto a 64-deep undo stack; `Ctrl+Z` / `Ctrl+Y` / `Ctrl+Shift+Z` (throttled by the mod) and `/charter undo|redo` drive it. Starting playback deselects and closes the panel; edits are rejected while playing.
 
 ### Config Keys
 
@@ -117,4 +120,4 @@ RhythMC-Preview deserialize.
 
 ## Out of Scope
 
-There is no HTTP, WebSocket, DB, auth/session, resource-pack, or frontend DTO contract in this repo. Do not reintroduce any of these. `rhythmc:chart_preview` belongs to RhythMCChartMaker + RhythMC-Preview and must not be modified from here. Not in v1: `SET_SPEED`/pitch-preserving speed, note editing commands beyond placement, and judging/gameplay scoring. Editor chart persistence beyond the documented RMCD format (implementation is a later milestone) is also out of scope for now.
+There is no HTTP, WebSocket, DB, auth/session, resource-pack, or frontend DTO contract in this repo. Do not reintroduce any of these. `rhythmc:chart_preview` belongs to RhythMCChartMaker + RhythMC-Preview and must not be modified from here. Not in v1: `SET_SPEED`/pitch-preserving speed, track event editing (transform/scale/rotation/speed events), format painter / editor hotbar tools, and judging/gameplay scoring. Chart persistence beyond the documented RMCD format (implementation is a later milestone) is also out of scope for now — the note property panel edits in-memory state only.

@@ -58,6 +58,19 @@ public final class CharterAudioChannel {
     public static final int OP_VIEW_STATE = 111;
     /** v1.1: 时间轴点击 seek 请求（C→S）：double toMs。 */
     public static final int OP_VIEW_SEEK = 112;
+    /** v1.2: 编辑器请求（C→S）：byte action [+ APPLY 载荷]。 */
+    public static final int OP_EDIT_REQ = 113;
+    /** v1.2: 编辑状态（S→C）：选中音符属性快照 + undo/redo 可用性。 */
+    public static final int OP_EDIT_STATE = 114;
+
+    // EDIT_REQ action（与插件 CharterAudioBridge 严格一致）
+    public static final int EDIT_OPEN_NOTE_GUI = 0;
+    public static final int EDIT_UNDO = 1;
+    public static final int EDIT_REDO = 2;
+    public static final int EDIT_DESELECT = 3;
+    public static final int EDIT_APPLY = 4;
+    public static final int EDIT_DELETE_SELECTED = 5;
+    public static final int EDIT_CLONE_TO_NEXT = 6;
 
     private CharterAudioChannel() {
     }

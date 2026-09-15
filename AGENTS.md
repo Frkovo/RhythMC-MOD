@@ -80,6 +80,8 @@ Unknown opcodes are ignored. `sessionId` is always `""` and is not validated.
 | C→S | 110 | `VIEW_ZOOM` | `byte direction`（世界网格缩放 ±1 级；SHIFT+滚轮） |
 | S→C | 111 | `VIEW_STATE` | `int zoomIndex, double barBlocks, int levelCount, double cursorMs`（时间轴 HUD 窗口中心/缩放状态） |
 | C→S | 112 | `VIEW_SEEK` | `double toMs`（ALT 调整层点击/拖动时间轴 seek） |
+| C→S | 113 | `EDIT_REQ` | `byte action` [+ APPLY 载荷：`byte type, double beat, posX, posY, posZ, float scaleX, scaleY, scaleZ, rotX, rotY, rotZ, byte holdBoundary, int holdGroupManual`]（编辑器请求：0 打开属性面板/1 撤销/2 重做/3 取消选中/4 应用属性/5 删除选中/6 复制到下一分音点；中键发 0，Ctrl+Z/Y 发 1/2） |
+| S→C | 114 | `EDIT_STATE` | `boolean ok, String reason, byte type, double beat, posX, posY, posZ, float scaleX, scaleY, scaleZ, rotX, rotY, rotZ, int holdGroup, holdGroupSize, holdGroupIndex, byte holdBoundary, int holdGroupManual, double maxHalfWidth, maxHalfHeight, dodgeScale, beatStep, boolean canUndo, canRedo`（选中音符属性快照；ok=true 自动打开属性面板，ok=false 关闭；holdBoundary 0 自动/1 链首/2 链尾；holdGroupManual -1 自动/≥0 显式组号） |
 
 Reserved for later milestones (do not repurpose): 8, 9, 102, 104.
 See `.agent/CONTRACTS.md` for the full lifecycle and trust model.
@@ -94,6 +96,9 @@ See `.agent/CONTRACTS.md` for the full lifecycle and trust model.
 | `src/client/java/.../client/net/CharterAudioPayload.java` | `CustomPayload` wrapper for raw frame bytes |
 | `src/client/java/.../client/net/CharterAudioClient.java` | HELLO handshake, frame dispatch, transport handling, STATE reporting |
 | `src/client/java/.../client/net/ChartMetaState.java` | `CHART_META(2)` cache for the timeline HUD |
+| `src/client/java/.../client/net/EditState.java` | `EDIT_STATE(114)` cache driving the note property panel |
+| `src/client/java/.../client/edit/NoteEditScreen.java` | Note property panel (inline numeric editors + sliders, middle-click opened) |
+| `src/client/java/.../client/input/EditInput.java` | Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z + panel open/close sync |
 | `src/client/java/.../client/input/CharterKeybinds.java` | Transport keybinds → `TRANSPORT_REQ(10)` |
 | `src/client/java/.../client/audio/AudioTransferReceiver.java` | Chunked download: `.part` file, SHA-256 verify, atomic move |
 | `src/client/java/.../client/audio/DownloadProgressState.java` | Shared progress state for the HUD |
