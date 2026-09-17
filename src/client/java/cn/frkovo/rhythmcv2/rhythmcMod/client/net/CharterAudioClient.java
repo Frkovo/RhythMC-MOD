@@ -39,6 +39,7 @@ public final class CharterAudioClient {
     private final EditState editState = new EditState();
     private final EventState eventState = new EventState();
     private final EventHudState eventHud = new EventHudState();
+    private final BoundsDataState boundsData = new BoundsDataState();
     /** 待选中段号（时间轴端点点击 → 事件面板打开时消费）。 */
     private volatile int pendingSelect = -1;
     private final AtomicInteger tickCounter = new AtomicInteger();
@@ -156,6 +157,7 @@ public final class CharterAudioClient {
         editState.reset();
         eventState.reset();
         eventHud.reset();
+        boundsData.reset();
         pendingApply = null;
     }
 
@@ -297,6 +299,16 @@ public final class CharterAudioClient {
         send(buf);
     }
 
+    /** BOUNDS_REQ(118)：判定面/边框可视化开关（键位 B；只在 glob 实地播放中生效）。 */
+    public void requestBounds(boolean on) {
+        if (!handshakeOk) {
+            return;
+        }
+        PacketByteBuf buf = frame(CharterAudioChannel.OP_BOUNDS_REQ);
+        buf.writeByte(on ? 1 : 0);
+        send(buf);
+    }
+
     /** EDIT_REQ(113)：编辑器动作（中键选中/撤销/重做/取消选中/删除/复制）。 */
     public void requestEdit(int action) {
         LOGGER.info("[charter_audio] EDIT_REQ action={}", action);
@@ -414,18 +426,6 @@ public final class CharterAudioClient {
         send(buf);
     }
 
-    /** EVENT_REQ PREVIEW：真实速度预览开关。 */
-    public void requestEventPreview(int channel, boolean on) {
-        if (!handshakeOk) {
-            return;
-        }
-        PacketByteBuf buf = frame(CharterAudioChannel.OP_EVENT_REQ);
-        buf.writeByte(CharterAudioChannel.EVENT_PREVIEW);
-        buf.writeByte(channel);
-        buf.writeByte(on ? 1 : 0);
-        send(buf);
-    }
-
     /** EVENT_REQ CLOSE：玩家关掉了事件面板（服务端据此停止「保持打开」）。 */
     public void requestEventClose(int channel) {
         if (!handshakeOk) {
@@ -465,6 +465,7 @@ public final class CharterAudioClient {
                 case CharterAudioChannel.OP_EDIT_STATE -> handleEditState(in);
                 case CharterAudioChannel.OP_EVENT_STATE -> handleEventState(in);
                 case CharterAudioChannel.OP_EVENT_HUD -> handleEventHud(in);
+                case CharterAudioChannel.OP_BOUNDS_DATA -> handleBoundsData(in);
                 case CharterAudioChannel.OP_AUDIO_PUSH_START -> handlePushStart(in);
                 case CharterAudioChannel.OP_AUDIO_PUSH_CHUNK -> handlePushChunk(in);
                 case CharterAudioChannel.OP_AUDIO_PUSH_END -> handlePushEnd(in);
@@ -645,13 +646,12 @@ public final class CharterAudioClient {
                 canUndo, canRedo));
     }
 
-    /** EVENT_STATE(116)：boolean ok, String reason, int trackId, byte channel, byte preview, int count, {5 字段}[]. */
+    /** EVENT_STATE(116)：boolean ok, String reason, int trackId, byte channel, byte panel, int count, {5 字段}[]. */
     private void handleEventState(DataInputStream in) throws IOException {
         boolean ok = in.readBoolean();
         String reason = readUtf8(in);
         int trackId = in.readInt();
         int channel = in.readByte();
-        boolean preview = in.readByte() != 0;
         boolean panel = in.readByte() != 0;
         int selectIndex = in.readInt();
         int count = in.readInt();
@@ -672,17 +672,16 @@ public final class CharterAudioClient {
             events.add(new EventState.Event(startBeat, endBeat, startValue, endValue, Easing.clamp(easing)));
         }
         eventState.update(new EventState.Snapshot(ok, reason == null ? "" : reason,
-                trackId, channel, preview, panel, selectIndex, List.copyOf(events)));
+                trackId, channel, panel, selectIndex, List.copyOf(events)));
         if (!ok && reason != null && !reason.isBlank()) {
             chat("[RhythMC] " + reason);
         }
     }
 
-    /** EVENT_HUD(117)：int trackId, byte channel, byte preview, int count, {double×4, byte easing}[]. */
+    /** EVENT_HUD(117)：int trackId, byte channel, int count, {double×4, byte easing}[]. */
     private void handleEventHud(DataInputStream in) throws IOException {
         int trackId = in.readInt();
         int channel = in.readByte();
-        boolean preview = in.readByte() != 0;
         int count = in.readInt();
         if (count < 0 || count > EventHudState.maxEvents()) {
             throw new IOException("EVENT_HUD 非法段数: " + count);
@@ -700,7 +699,58 @@ public final class CharterAudioClient {
             }
             segments.add(new EventHudState.Segment(startBeat, endBeat, startValue, endValue, Easing.clamp(easing)));
         }
-        eventHud.update(new EventHudState.Snapshot(trackId, channel, preview, List.copyOf(segments)));
+        eventHud.update(new EventHudState.Snapshot(trackId, channel, List.copyOf(segments)));
+    }
+
+    /** 当前轮廓可视化静态数据（BOUNDS_DATA 119）。 */
+    public BoundsDataState boundsData() {
+        return boundsData;
+    }
+
+    /**
+     * BOUNDS_DATA(119)：`boolean on, double baseX/Y/Z, double planeHalf, double boxLength,
+     * double yOffset, int trackCount, {int trackId, 10× (int count + {double×4, byte easing}[])}`。
+     */
+    private void handleBoundsData(DataInputStream in) throws IOException {
+        boolean on = in.readBoolean();
+        double baseX = in.readDouble();
+        double baseY = in.readDouble();
+        double baseZ = in.readDouble();
+        double planeHalf = in.readDouble();
+        double boxLength = in.readDouble();
+        double yOffset = in.readDouble();
+        int trackCount = in.readInt();
+        if (trackCount < 0 || trackCount > 512) {
+            throw new IOException("BOUNDS_DATA 非法 Track 数: " + trackCount);
+        }
+        List<BoundsDataState.Track> tracks = new ArrayList<>(trackCount);
+        for (int t = 0; t < trackCount; t++) {
+            int trackId = in.readInt();
+            List<List<BoundsDataState.Segment>> channels = new ArrayList<>(BoundsDataState.CHANNEL_COUNT);
+            for (int c = 0; c < BoundsDataState.CHANNEL_COUNT; c++) {
+                int count = in.readInt();
+                if (count < 0 || count > BoundsDataState.MAX_SEGMENTS_PER_CHANNEL) {
+                    throw new IOException("BOUNDS_DATA 非法段数: " + count);
+                }
+                List<BoundsDataState.Segment> segments = new ArrayList<>(count);
+                for (int i = 0; i < count; i++) {
+                    double startBeat = in.readDouble();
+                    double endBeat = in.readDouble();
+                    double startValue = in.readDouble();
+                    double endValue = in.readDouble();
+                    int easing = in.readByte();
+                    if (!Double.isFinite(startBeat) || !Double.isFinite(endBeat)
+                            || !Double.isFinite(startValue) || !Double.isFinite(endValue)) {
+                        throw new IOException("BOUNDS_DATA 非法数值段 #" + i);
+                    }
+                    segments.add(new BoundsDataState.Segment(startBeat, endBeat, startValue, endValue,
+                            Easing.clamp(easing)));
+                }
+                channels.add(List.copyOf(segments));
+            }
+            tracks.add(new BoundsDataState.Track(trackId, List.copyOf(channels)));
+        }
+        boundsData.update(on, baseX, baseY, baseZ, planeHalf, boxLength, yOffset, tracks);
     }
 
     private void handlePushStart(DataInputStream in) throws IOException {

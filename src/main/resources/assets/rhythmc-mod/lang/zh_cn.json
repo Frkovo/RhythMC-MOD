@@ -9,5 +9,6 @@
   "key.rhythmc-mod.stop": "停止",
   "key.rhythmc-mod.timeline_hud": "时间轴 HUD 开关",
   "key.rhythmc-mod.open_event_panel": "打开 Track 事件面板",
+  "key.rhythmc-mod.toggle_bounds": "判定面/边框显示（glob）",
   "key.rhythmc-mod.hint_toggle": "按键提示开关"
 }

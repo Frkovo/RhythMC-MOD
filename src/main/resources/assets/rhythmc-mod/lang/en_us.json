@@ -9,5 +9,6 @@
   "key.rhythmc-mod.stop": "Stop",
   "key.rhythmc-mod.timeline_hud": "Toggle Timeline HUD",
   "key.rhythmc-mod.open_event_panel": "Open Track Event Panel",
+  "key.rhythmc-mod.toggle_bounds": "Toggle Judge Plane / Bounds (glob)",
   "key.rhythmc-mod.hint_toggle": "Toggle Key Hints"
 }

@@ -75,7 +75,7 @@ public final class EventEditScreen extends Screen {
 
     /** 数值单位。 */
     private static final String[] CH_UNITS = {
-            "×", "格", "格", "格", "倍", "倍", "倍", "度", "度", "度"};
+            "格/秒", "格", "格", "格", "倍", "倍", "倍", "度", "度", "度"};
 
     /** 效果句里的主语句。 */
     private static final String[] CH_SUBJECTS = {
@@ -85,7 +85,7 @@ public final class EventEditScreen extends Screen {
 
     /** 通道说明（最多 2 行；空串不绘制）。 */
     private static final String[][] CH_DESC = {
-            {"为常态流速的倍率：1.0 = 常态（官方谱面约 1.0–1.3）。", "正值向前、负值倒流；数字越大，音符来得越快。"},
+            {"音符飞行速度，单位 格/秒：20 = 常态（与 BPM 无关）。", "0 = 停住、负值倒流；数字越大，音符来得越快。"},
             {"轨道沿 X 轴平移，单位 格。", "正值向右，负值向左。"},
             {"轨道沿 Y 轴平移，单位 格。", "正值向上，负值向下。"},
             {"轨道沿 Z 轴平移，单位 格。", "正值靠近判定面，负值远离。"},
@@ -236,9 +236,8 @@ public final class EventEditScreen extends Screen {
 
         renderCreateArea(context, layout, state);
         renderFooter(context, layout, state);
-        renderPreviewToggle(context, layout, state);
         context.drawText(textRenderer,
-                Text.literal("试听=完整效果+音乐 · 只预览=只看当前通道（无音乐）· 点击数值编辑 · Esc 关闭"),
+                Text.literal("试听=完整效果+音乐 · 点击数值编辑 · Esc 关闭"),
                 panelX + PADDING, layout.hintY(), HINT_COLOR, false);
     }
 
@@ -349,27 +348,27 @@ public final class EventEditScreen extends Screen {
         centered(context, "＋ 在游标处切开", create, VALUE_COLOR);
     }
 
-    /** 通道预览开关（在播放按钮下面一行）：无音乐、只应用当前通道。 */
-    private void renderPreviewToggle(DrawContext context, Layout layout, EventState.Snapshot state) {
-        Rect toggle = layout.previewButton();
-        boolean on = state.preview();
-        context.fill(toggle.x0(), toggle.y0(), toggle.x1(), toggle.y1(), on ? BUTTON_BG_ACTIVE : BUTTON_BG);
-        centered(context, on ? "只预览当前通道：开（无音乐）" : "只预览当前通道：关（无音乐）", toggle, VALUE_COLOR);
-    }
-
     private void renderFooter(DrawContext context, Layout layout, EventState.Snapshot state) {
         for (int i = 0; i < layout.footerButtons().length; i++) {
             Rect rect = layout.footerButtons()[i];
             boolean enabled = i != 0 || selectedEvent(state) != null;
-            context.fill(rect.x0(), rect.y0(), rect.x1(), rect.y1(), enabled ? BUTTON_BG : BUTTON_BG_DISABLED);
-            centered(context, FOOTER_LABELS[i], rect, enabled ? VALUE_COLOR : HINT_COLOR);
+            int bg = enabled ? BUTTON_BG : BUTTON_BG_DISABLED;
+            context.fill(rect.x0(), rect.y0(), rect.x1(), rect.y1(), bg);
+            centered(context, footerLabel(i), rect, enabled ? VALUE_COLOR : HINT_COLOR);
         }
         Rect close = layout.closeButton();
         context.fill(close.x0(), close.y0(), close.x1(), close.y1(), BUTTON_BG);
         centered(context, "关闭", close, VALUE_COLOR);
     }
 
-    private static final String[] FOOTER_LABELS = {"试听本段", "撤销", "重做"};
+    /** 行内三个按钮：试听本段 / 撤销 / 重做。 */
+    private static String footerLabel(int index) {
+        return switch (index) {
+            case 1 -> "撤销";
+            case 2 -> "重做";
+            default -> "试听本段";
+        };
+    }
 
     private void renderEasingPage(DrawContext context, Layout layout, EventState.Snapshot state) {
         int rowH = 15;
@@ -463,11 +462,6 @@ public final class EventEditScreen extends Screen {
         if (layout.createButton().contains(mx, my)) {
             commitEditor();
             CharterAudioClient.get().requestEventSplit(state.channel(), cursorBeat());
-            return true;
-        }
-        if (layout.previewButton().contains(mx, my)) {
-            commitEditor();
-            CharterAudioClient.get().requestEventPreview(state.channel(), !state.preview());
             return true;
         }
         for (int i = 0; i < layout.footerButtons().length; i++) {
@@ -751,11 +745,8 @@ public final class EventEditScreen extends Screen {
             return;
         }
         double value;
-        // 流速是倍率：允许 1.25x / 0.5X 写法
-        String numeric = text.endsWith("x") || text.endsWith("X")
-                ? text.substring(0, text.length() - 1).trim() : text;
         try {
-            value = Double.parseDouble(numeric);
+            value = Double.parseDouble(text);
         } catch (NumberFormatException e) {
             return;
         }
@@ -811,7 +802,7 @@ public final class EventEditScreen extends Screen {
                           int titleY, int infoY, int descY, int listHeaderY,
                           int cardTop, int cardBottom, int cardTitleY, int cardEffectY,
                           Rect[] cardFields, Rect cardEasing, Rect[] cardButtons, Rect[] stepButtons,
-                          int createLabelY, Rect createButton, Rect previewButton,
+                          int createLabelY, Rect createButton,
                           Rect[] footerButtons, Rect closeButton, int hintY) {
 
         Rect cardField(int index) {
@@ -893,15 +884,13 @@ public final class EventEditScreen extends Screen {
         for (int i = 0; i < 3; i++) {
             footerButtons[i] = footerLike(x, panelW, 3, i, footerY);
         }
-        // 通道预览开关放在播放按钮下面（先「试听/撤销/重做」，再预览开关，最后关闭）
-        int previewY = footerY + BUTTON_H + 2;
-        Rect previewButton = new Rect(x + PADDING, previewY, x + panelW - PADDING, previewY + FIELD_H);
-        Rect closeButton = new Rect(x + PADDING, previewY + FIELD_H + 4, x + panelW - PADDING,
-                previewY + FIELD_H + 4 + BUTTON_H);
-        int hintY = previewY + FIELD_H + 4 + BUTTON_H + 4;
+        // 一行三个：试听本段 / 撤销 / 重做；关闭与提示行在下面
+        Rect closeButton = new Rect(x + PADDING, footerY + BUTTON_H + 2, x + panelW - PADDING,
+                footerY + BUTTON_H * 2);
+        int hintY = footerY + BUTTON_H * 2 + 4;
         return new Layout(hintY + LINE_H + 10, channels, listRows, rows, titleY, infoY, descY, listHeaderY,
                 cardTop, cardBottom, cardTitleY, effectY, cardFields, cardEasing, cardButtons, stepButtons,
-                createLabelY, createButton, previewButton, footerButtons, closeButton, hintY);
+                createLabelY, createButton, footerButtons, closeButton, hintY);
     }
 
     private Rect footerLike(int panelX0, int width, int count, int index, int y) {

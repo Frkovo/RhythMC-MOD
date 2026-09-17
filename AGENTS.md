@@ -4,6 +4,10 @@ RhythMC-MOD is the Fabric client mod (Minecraft 1.21.11, yarn mappings, Java 21)
 RhythMC charter editor. It is the client half of the `rhythmc:charter_audio` plugin channel,
 talking to the Paper plugin **RhythMC-Charter-V2** (parent repository).
 
+**Together with the plugin, this mod is the project's only chart editor.** The sibling tools
+`RhythMCChartMaker` / `RhythMC-Preview` are legacy tooling and a preview service — never
+document or extend them as chartering entry points.
+
 ## Read First
 
 1. `AGENTS.md` (this file)
@@ -15,9 +19,9 @@ talking to the Paper plugin **RhythMC-Charter-V2** (parent repository).
 
 | Area | Path | Responsibility |
 |---|---|---|
-| This repo | `E:/Dev/RhythMC-Charter-V2/RhythMC-MOD` | Fabric client mod: download receiver, HUD progress, audio decode/playback |
-| Server plugin | `E:/Dev/RhythMC-Charter-V2` | Paper plugin: handshake, audio push service, `/charter` commands |
-| Sibling repos | `E:/Dev/RhythMCChartMaker`, `E:/Dev/RhythMC-Preview` | Own the separate `rhythmc:chart_preview` channel (chart + audio upload) |
+| This repo | `E:/Dev/RhythMC-Charter-V2/RhythMC-MOD` | Fabric client mod: editor UI (event/note panels, timeline HUD), chunked download receiver, audio decode/playback |
+| Server plugin | `E:/Dev/RhythMC-Charter-V2` | Paper plugin: the **only chart editor** — in-game editor sessions, `/charter` commands, handshake, audio push service |
+| Sibling repos | `E:/Dev/RhythMCChartMaker`, `E:/Dev/RhythMC-Preview` | **Not charter editors** (legacy tooling / preview service); own the separate `rhythmc:chart_preview` channel |
 | Contract | `.agent/CONTRACTS.md` | Opcode table, payload encoding, lifecycle, trust model |
 | Mixin config | `src/client/resources/rhythmc-mod.client.mixins.json` | Client mixin registration |
 
@@ -82,9 +86,11 @@ Unknown opcodes are ignored. `sessionId` is always `""` and is not validated.
 | C→S | 112 | `VIEW_SEEK` | `double toMs`（ALT 调整层点击/拖动时间轴 seek） |
 | C→S | 113 | `EDIT_REQ` | `byte action` [+ APPLY 载荷：`byte type, double beat, posX, posY, posZ, float scaleX, scaleY, scaleZ, rotX, rotY, rotZ, byte holdBoundary, int holdGroupManual`]（编辑器请求：0 打开属性面板/1 撤销/2 重做/3 取消选中/4 应用属性/5 删除选中/6 复制到下一分音点；中键发 0，Ctrl+Z/Y 发 1/2） |
 | S→C | 114 | `EDIT_STATE` | `boolean ok, String reason, byte type, double beat, posX, posY, posZ, float scaleX, scaleY, scaleZ, rotX, rotY, rotZ, int holdGroup, holdGroupSize, holdGroupIndex, byte holdBoundary, int holdGroupManual, double maxHalfWidth, maxHalfHeight, beatStep, boolean canUndo, canRedo`（选中音符属性快照；ok=true 自动打开属性面板，ok=false 关闭；holdBoundary 0 自动/1 链首/2 链尾；holdGroupManual -1 自动/≥0 显式组号） |
-| C→S | 115 | `EVENT_REQ` | `byte op` [+ 载荷]（Track 事件：0 列表/打开面板 `byte channel`、1 切开 `byte channel, double beat`（把该拍所在段一分为二，曲线形状不变，段数 +1）、2 修改 `byte channel, int index, double startBeat, endBeat, startValue, endValue, int easing, byte valueMode`（拍=移动与邻段共享的边界；valueMode 0 起止值都设 / 1 只设终点值并同步下一段起点值 / 2 只设起点值＝造跳变）、3 并入上一段 `byte channel, int index`（段数 −1，只剩 1 段时拒绝）、4 重置通道 `byte channel`、5 只预览当前通道 `byte channel, byte on`（isolated：只应用当前通道整条，其余 9 条通道中性，Note 由引擎渲染窗口裁剪，锚点=观察点，时钟=游标，走动不移动音符）、6 关闭面板 `byte channel`、7 试听 `byte channel, int index`（index<0 = 从游标播放）；channel 0 Speed/1 X/2 Y/3 Z/4 SX/5 SY/6 SZ/7 RX/8 RY/9 RZ；**通道是 `[0, 曲尾]` 的连续分段（无缝隙无重叠，每段 ≥0.25 拍），跳变＝公共边界上值不连续（不需要零长度段）**；曲尾 = max(曲长换算拍数, 末音符拍 + 8)；值域 speed ±32× / 位移 ±256 / 缩放 0.01–16 / 旋转 ±720） |
-| S→C | 116 | `EVENT_STATE` | `boolean ok, String reason, int trackId, byte channel, byte preview, byte panel, int selectIndex, int count, {double startBeat, double endBeat, double startValue, double endValue, int easing}[]`（某 Track 某通道全部事件段；panel=1 仅 LIST 应答时下发；ok=false 关面板） |
-| S→C | 117 | `EVENT_HUD` | `int trackId, byte channel, byte preview, int count, {double startBeat, double endBeat, double startValue, double endValue, byte easing}[]`（时间轴 HUD 的当前通道曲线；mod-ready/切 Track/切通道/事件增删改/undo-redo/关会话时推送，不塞进每 tick 的 VIEW_STATE） |
+| C→S | 115 | `EVENT_REQ` | `byte op` [+ 载荷]（Track 事件：0 列表/打开面板 `byte channel`、1 切开 `byte channel, double beat`（把该拍所在段一分为二，曲线形状不变，段数 +1）、2 修改 `byte channel, int index, double startBeat, endBeat, startValue, endValue, int easing, byte valueMode`（拍=移动与邻段共享的边界；valueMode 0 起止值都设 / 1 只设终点值并同步下一段起点值 / 2 只设起点值＝造跳变）、3 并入上一段 `byte channel, int index`（段数 −1，只剩 1 段时拒绝）、4 重置通道 `byte channel`、5 关闭面板 `byte channel`、6 试听 `byte channel, int index`（index<0 = 从游标播放）；channel 0 Speed/1 X/2 Y/3 Z/4 SX/5 SY/6 SZ/7 RX/8 RY/9 RZ；**通道是 `[0, 曲尾]` 的连续分段（无缝隙无重叠，每段 ≥0.25 拍），跳变＝公共边界上值不连续（不需要零长度段）**；曲尾 = max(曲长换算拍数, 末音符拍 + 8)；值域 speed ±640 格/秒 / 位移 ±256 / 缩放 0.01–16 / 旋转 ±720） |
+| S→C | 116 | `EVENT_STATE` | `boolean ok, String reason, int trackId, byte channel, byte panel, int selectIndex, int count, {double startBeat, double endBeat, double startValue, double endValue, int easing}[]`（某 Track 某通道全部事件段；panel=1 仅 LIST 应答时下发；ok=false 关面板） |
+| S→C | 117 | `EVENT_HUD` | `int trackId, byte channel, int count, {double startBeat, double endBeat, double startValue, double endValue, byte easing}[]`（时间轴 HUD 的当前通道曲线；mod-ready/切 Track/切通道/事件增删改/undo-redo/关会话时推送，不塞进每 tick 的 VIEW_STATE） |
+| C→S | 118 | `BOUNDS_REQ` | `byte on`（mod 键位 `B`：轨道轮廓可视化开关；**只在 glob 实地播放中生效**，否则插件只回一句提示。插件本身不渲染任何东西，只回 119） |
+| S→C | 119 | `BOUNDS_DATA` | `boolean on, double baseX, baseY, baseZ, planeHalf, boxLength, yOffset, int trackCount, {int trackId, 10× (int segCount, {double startBeat, endBeat, startValue, endValue, byte easing}[])}[]`（**静态**轮廓数据：判定面基点 + 判定面半宽/盒长/垂直偏移 + 每条 Track 的 10 条事件通道（顺序 = EventChannel：0 Speed/1 X/2 Y/3 Z/4 SX/5 SY/6 SZ/7 RX/8 RY/9 RZ）。开关打开/谱面变化时下发，**不每 tick**；mod 端按自己的音频时钟换算拍、本地求值并用 vanilla gizmo 画：12 棱框架（可穿墙）+ 半透明红判定面 + `TRACK #N`（**侧面不填充**）；`on=false` 时 trackCount=0） |
 
 Reserved for later milestones (do not repurpose): 8, 9, 102, 104.
 See `.agent/CONTRACTS.md` for the full lifecycle and trust model.
@@ -100,14 +106,16 @@ See `.agent/CONTRACTS.md` for the full lifecycle and trust model.
 | `src/client/java/.../client/net/CharterAudioClient.java` | HELLO handshake, frame dispatch, transport handling, STATE reporting |
 | `src/client/java/.../client/net/ChartMetaState.java` | `CHART_META(2)` cache for the timeline HUD |
 | `src/client/java/.../client/net/EditState.java` | `EDIT_STATE(114)` cache driving the note property panel |
-| `src/client/java/.../client/net/EventState.java` | `EVENT_STATE(116)` cache (event segments + preview flag) driving the event panel |
+| `src/client/java/.../client/net/EventState.java` | `EVENT_STATE(116)` cache (event segments) driving the event panel |
 | `src/client/java/.../client/net/EventHudState.java` | `EVENT_HUD(117)` cache: current-channel curve for the timeline HUD |
 | `src/client/java/.../client/net/EasingCurve.java` | Easing table (same 34 functions as the plugin EasingUtils) used to draw the HUD curve |
 | `src/client/java/.../client/net/Easing.java` | 34 easing names (ordinal = wire value, mirrors the plugin `Easings`) |
 | `src/client/java/.../client/edit/NoteEditScreen.java` | Note property panel (inline numeric editors + sliders, middle-click opened) |
-| `src/client/java/.../client/edit/EventEditScreen.java` | Track event panel (channel row, segment list, inline editors, easing page, split/merge/reset, isolated-segment preview toggle, `G` opened) |
+| `src/client/java/.../client/edit/EventEditScreen.java` | Track event panel (channel row, segment list, inline editors, easing page, split/merge/reset, footer row `试听本段 / 撤销 / 重做`, `G` opened) |
 | `src/client/java/.../client/input/EditInput.java` | Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z + panel open/close sync |
-| `src/client/java/.../client/input/CharterKeybinds.java` | Transport keybinds → `TRANSPORT_REQ(10)`; `G` → `EVENT_REQ LIST` |
+| `src/client/java/.../client/input/CharterKeybinds.java` | Transport keybinds → `TRANSPORT_REQ(10)`; `G` → `EVENT_REQ LIST`; `B` → `BOUNDS_REQ(118)` track outline; `Ctrl+Space`（`KeyboardMixin` 里拦截）→ `TRANSPORT_REQ 0` 播放/暂停 |
+| `src/client/java/.../client/net/BoundsDataState.java` | `BOUNDS_DATA(119)` cache: judge-plane base + every track's 10 event channels; `evaluate()` mirrors the plugin `ChartUtils.getTransformation` |
+| `src/client/java/.../client/render/TrackBoundsRenderer.java` | Client-side track outline (vanilla 1.21.11 gizmo API): 5x5 judge plane + box (12 edges via `ignoreOcclusion()`, faint faces) + `TRACK #N`, evaluated per frame from the local beat |
 | `src/client/java/.../client/audio/AudioTransferReceiver.java` | Chunked download: `.part` file, SHA-256 verify, atomic move |
 | `src/client/java/.../client/audio/DownloadProgressState.java` | Shared progress state for the HUD |
 | `src/client/java/.../client/audio/CharterAudioEngine.java` | PCM playback (SourceDataLine worker) |

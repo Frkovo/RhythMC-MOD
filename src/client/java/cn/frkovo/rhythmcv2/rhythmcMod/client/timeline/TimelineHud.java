@@ -254,10 +254,11 @@ public final class TimelineHud {
         };
     }
 
-    /** 通道中性值（与插件 EventRenderer.midValue 一致）：流速/缩放 1.0（常态），其余 0。 */
+    /** 通道中性值（与插件 EventRenderer.midValue 一致）：流速 20 格/秒（常态）、缩放 1.0，其余 0。 */
     private static double neutralValue(int channel) {
         return switch (Math.floorMod(channel, 10)) {
-            case 0, 4, 5, 6 -> 1d;
+            case 0 -> 20d;
+            case 4, 5, 6 -> 1d;
             default -> 0d;
         };
     }
@@ -278,10 +279,10 @@ public final class TimelineHud {
         };
     }
 
-    /** 通道单位后缀（与插件一致：流速是倍率）。 */
+    /** 通道单位后缀（与插件一致：流速单位 = 格/秒）。 */
     private static String channelUnit(int channel) {
         return switch (Math.floorMod(channel, 10)) {
-            case 0 -> "×";
+            case 0 -> "格/秒";
             case 4, 5, 6 -> "倍";
             case 7, 8, 9 -> "度";
             default -> "格";

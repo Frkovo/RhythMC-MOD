@@ -33,6 +33,7 @@ public final class CharterKeybinds {
     private static KeyBinding timelineHud;
     private static KeyBinding openEventPanel;
     private static KeyBinding hintToggle;
+    private static KeyBinding toggleBounds;
 
     private CharterKeybinds() {
     }
@@ -53,6 +54,7 @@ public final class CharterKeybinds {
         addHint(hints, loopClear, "清循环");
         addHint(hints, stop, "停止");
         addHint(hints, timelineHud, "时间轴开关");
+        addHint(hints, toggleBounds, "判定面/边框");
         return hints;
     }
 
@@ -73,6 +75,7 @@ public final class CharterKeybinds {
         timelineHud = reg("key.rhythmc-mod.timeline_hud");
         openEventPanel = reg("key.rhythmc-mod.open_event_panel", GLFW.GLFW_KEY_G);
         hintToggle = reg("key.rhythmc-mod.hint_toggle");
+        toggleBounds = reg("key.rhythmc-mod.toggle_bounds", GLFW.GLFW_KEY_B);
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             CharterAudioClient audio = CharterAudioClient.get();
@@ -105,6 +108,10 @@ public final class CharterKeybinds {
             }
             while (hintToggle.wasPressed()) {
                 KeyHintHud.toggle();
+            }
+            while (toggleBounds.wasPressed()) {
+                // 开关状态以服务端下发的 BOUNDS_DATA 为准（非 glob 时插件会拒绝，本地不会误翻）
+                audio.requestBounds(!audio.boundsData().on());
             }
         });
     }

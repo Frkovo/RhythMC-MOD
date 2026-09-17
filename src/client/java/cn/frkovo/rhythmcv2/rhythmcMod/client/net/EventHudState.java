@@ -22,10 +22,10 @@ public final class EventHudState {
     }
 
     /** 一次推送的快照；{@code trackId < 0} 表示无数据（HUD 不画曲线）。 */
-    public record Snapshot(int trackId, int channel, boolean preview, List<Segment> segments) {
+    public record Snapshot(int trackId, int channel, List<Segment> segments) {
 
         public static Snapshot empty() {
-            return new Snapshot(-1, 0, false, List.of());
+            return new Snapshot(-1, 0, List.of());
         }
     }
 

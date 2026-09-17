@@ -3,7 +3,7 @@ package cn.frkovo.rhythmcv2.rhythmcMod.client.net;
 import java.util.List;
 
 /**
- * EVENT_STATE(116) 缓存：当前 Track 某通道的事件段列表 + 真实速度预览开关。
+ * EVENT_STATE(116) 缓存：当前 Track 某通道的事件段列表。
  * {@code ok=false} 表示面板应关闭（无会话 / 播放中 / 会话已关闭）。
  */
 public final class EventState {
@@ -68,7 +68,7 @@ public final class EventState {
         }
     }
 
-    public record Snapshot(boolean ok, String reason, int trackId, int channel, boolean preview,
+    public record Snapshot(boolean ok, String reason, int trackId, int channel,
                            boolean panel, int selectIndex, java.util.List<Event> events) {
 
         public Event event(int index) {
@@ -79,7 +79,7 @@ public final class EventState {
     private volatile Snapshot snapshot = closed();
 
     public static Snapshot closed() {
-        return new Snapshot(false, "", 0, CHANNEL_SPEED, false, false, -1, java.util.List.of());
+        return new Snapshot(false, "", 0, CHANNEL_SPEED, false, -1, java.util.List.of());
     }
 
     public void update(Snapshot snapshot) {

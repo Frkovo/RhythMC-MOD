@@ -79,6 +79,16 @@ public final class CharterAudioChannel {
     /** v1.3: 事件曲线（S→C）：时间轴 HUD 的当前通道曲线（不塞进每 tick 的 VIEW_STATE）。 */
     public static final int OP_EVENT_HUD = 117;
 
+    /** 判定面/边框可视化开关（C→S，键位 B）：`byte on`。只在 glob 实地播放中生效。 */
+    public static final int OP_BOUNDS_REQ = 118;
+
+    /**
+     * 轮廓可视化静态数据（S→C）：`boolean on, double baseX/Y/Z, double planeHalf, double boxLength,
+     * int trackCount, {int trackId, 10× (int count + {double startBeat, endBeat, startValue,
+     * endValue, byte easing}[])}`。开关打开/谱面变化时下发；客户端按拍自行求值绘制。
+     */
+    public static final int OP_BOUNDS_DATA = 119;
+
     // EVENT_REQ op（与插件 CharterAudioBridge 严格一致）
     public static final int EVENT_LIST = 0;
     /** 在某一拍切开该通道（1 段 → 2 段）；载荷 `byte channel, double beat`。 */
@@ -86,10 +96,9 @@ public final class CharterAudioChannel {
     public static final int EVENT_UPDATE = 2;
     public static final int EVENT_REMOVE = 3;
     public static final int EVENT_CLEAR = 4;
-    public static final int EVENT_PREVIEW = 5;
-    public static final int EVENT_CLOSE = 6;
+    public static final int EVENT_CLOSE = 5;
     /** 试听某段（index >= 0）或从游标播放（index < 0）：`byte channel, int index`。 */
-    public static final int EVENT_AUDITION = 7;
+    public static final int EVENT_AUDITION = 6;
 
     // EVENT_UPDATE 的 valueMode（与插件 EventRules / EditorTrack.updateEvent 一致）
     /** 起止值都设（不额外同步）。 */
